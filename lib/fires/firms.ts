@@ -1,4 +1,5 @@
 import { Bounds, clampLatitude, normalizeLongitude } from "../map/regional-cells";
+import { fetchWithTimeout } from "../security/fetch-with-timeout";
 
 export interface FireDetection {
   id: string;
@@ -120,7 +121,7 @@ async function fetchFirmsBbox(bounds: Bounds, key?: string): Promise<FireDetecti
 
   const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/VIIRS_SNPP_NRT/${w},${s},${e},${n}/1`;
 
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, 8000);
   if (!res.ok) {
     throw new Error(`NASA FIRMS API returned status ${res.status}: ${res.statusText}`);
   }

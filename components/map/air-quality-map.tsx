@@ -227,11 +227,45 @@ export function AirQualityMap({
     const next3D = !is3D;
     setIs3D(next3D);
 
-    mapRef.current.easeTo({
+    const map = mapRef.current;
+    map.easeTo({
       pitch: next3D ? 55 : 0,
       bearing: next3D ? 20 : 0,
       duration: 1000,
     });
+
+    if (map.isStyleLoaded()) {
+      const buildingLayerId = "3d-buildings-extrusion";
+      if (!map.getLayer(buildingLayerId) && map.getSource("openmaptiles")) {
+        try {
+          map.addLayer({
+            id: buildingLayerId,
+            source: "openmaptiles",
+            "source-layer": "building",
+            type: "fill-extrusion",
+            minzoom: 14,
+            paint: {
+              "fill-extrusion-color": "#1e293b",
+              "fill-extrusion-height": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                14,
+                0,
+                14.5,
+                ["coalesce", ["get", "render_height"], 12],
+              ],
+              "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+              "fill-extrusion-opacity": 0.7,
+            },
+          });
+        } catch {
+          // Graceful fallback if style doesn't have building vector layer
+        }
+      } else if (map.getLayer(buildingLayerId)) {
+        map.setLayoutProperty(buildingLayerId, "visibility", next3D ? "visible" : "none");
+      }
+    }
   }, [is3D]);
 
   // Update GeoJSON layer for regional forecast cells
@@ -361,22 +395,27 @@ export function AirQualityMap({
         const props = e.features?.[0]?.properties;
         if (props) {
           const coords = (e.features?.[0]?.geometry as any).coordinates;
-          const obsTime = props.observedAt ? new Date(props.observedAt).toLocaleString() : "Recent";
+          const localObsTime = props.observedAt
+            ? formatHourlyTime(props.observedAt, forecast?.timeZone || "UTC")
+            : "Recent";
+          const utcObsTime = props.observedAt
+            ? new Date(props.observedAt).toISOString().slice(11, 16) + " UTC"
+            : "UTC";
           new maplibregl.Popup()
             .setLngLat(coords)
             .setHTML(
               `<div style="font-family:sans-serif;font-size:12px;line-height:1.4">
                 <strong>NASA FIRMS Active Fire</strong><br/>
-                Observed: ${obsTime} UTC<br/>
-                Source: Satellite Detection<br/>
-                <span style="color:#94a3b8;font-size:10px">Material burned unknown</span>
+                Observed: ${localObsTime} (${utcObsTime})<br/>
+                Source: Satellite Detection (VIIRS)<br/>
+                <span style="color:#94a3b8;font-size:10px">Thermal anomaly detected; biomass material unverified</span>
               </div>`
             )
             .addTo(map);
         }
       });
     }
-  }, [firesGeoJson, showFires]);
+  }, [firesGeoJson, showFires, forecast?.timeZone]);
 
   // Render Smoke Trajectory Path Lines
   useEffect(() => {
@@ -494,7 +533,7 @@ export function AirQualityMap({
           <button
             type="button"
             onClick={toggle3D}
-            aria-label="Toggle 3D perspective view"
+            aria-label={is3D ? "Switch to 2D flat view" : "Switch to 3D perspective with extruded buildings"}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border backdrop-blur transition shadow-md ${
               is3D
                 ? "bg-emerald-600 text-white border-emerald-500 shadow-emerald-950"
@@ -502,7 +541,7 @@ export function AirQualityMap({
             }`}
           >
             <Box className="w-3.5 h-3.5" />
-            <span>{is3D ? "3D Active" : "3D View"}</span>
+            <span>{is3D ? "2D Flat View" : "3D Perspective / Buildings"}</span>
           </button>
 
           {onOpenPlan && (

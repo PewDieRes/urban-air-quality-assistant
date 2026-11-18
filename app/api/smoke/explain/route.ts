@@ -1,17 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { formatSmokeExplanation, SmokeExplanationRequest } from "@/lib/smoke/explain";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export const dynamic = "force-dynamic";
 
+const ExplainSchema = z.object({
+  fireId: z.string().max(100).optional(),
+  sourceLocationName: z.string().max(200).optional(),
+  destinationLocationName: z.string().max(200).optional(),
+  startHeightsM: z.array(z.number().min(10).max(10000)).max(5).optional(),
+  observedAt: z.string().max(50).optional(),
+});
+
 export async function POST(request: NextRequest) {
+  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  if (rateLimitResponse) return rateLimitResponse;
+
   try {
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: { code: "INVALID_JSON", message: "Malformed JSON request body" } },
+        { status: 400 }
+      );
+    }
+
+    const parseResult = ExplainSchema.safeParse(body);
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: { code: "INVALID_REQUEST", message: "Invalid explain parameters" } },
+        { status: 400 }
+      );
+    }
+
+    const val = parseResult.data;
     const req: SmokeExplanationRequest = {
-      fireId: body.fireId || "satellite-fire-detection",
-      sourceLocationName: body.sourceLocationName,
-      destinationLocationName: body.destinationLocationName,
-      startHeightsM: body.startHeightsM || [100, 500, 1000],
-      observedAt: body.observedAt || new Date().toISOString(),
+      fireId: val.fireId || "satellite-fire-detection",
+      sourceLocationName: val.sourceLocationName,
+      destinationLocationName: val.destinationLocationName,
+      startHeightsM: val.startHeightsM || [100, 500, 1000],
+      observedAt: val.observedAt || new Date().toISOString(),
     };
 
     const explanation = formatSmokeExplanation(req);

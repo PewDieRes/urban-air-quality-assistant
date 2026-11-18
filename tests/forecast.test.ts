@@ -3,6 +3,8 @@ import {
   normalizeForecast,
   getForecast,
   formatHourlyTime,
+  formatHourlyTimeWithDate,
+  parseTimeToUtcInstant,
   type OpenMeteoAirQualityResponse,
 } from "@/lib/forecast/open-meteo";
 import { Forecast } from "@/lib/forecast/types";
@@ -13,8 +15,6 @@ describe("forecast normalization and time handling", () => {
   });
 
   it("forecastUsesUniqueInstants: handles crossing midnight and daylight-saving clock changes with strictly unique, ordered instants", () => {
-    // Simulated daylight saving transition (e.g., London autumn transition where local wall-clock repeated, but UTC differs)
-    // 2026-10-25 00:00Z to 04:00Z crossing midnight
     const mockRawData: OpenMeteoAirQualityResponse = {
       latitude: 51.5,
       longitude: -0.12,
@@ -25,16 +25,15 @@ describe("forecast normalization and time handling", () => {
         us_aqi: 55,
       },
       hourly: {
-        // Crossing midnight and during daylight-saving fall-back
         time: [
           "2026-10-24T22:00:00Z",
           "2026-10-24T23:00:00Z",
-          "2026-10-25T00:00:00Z", // Midnight UTC
-          "2026-10-25T01:00:00Z", // Fall-back hour in UTC
+          "2026-10-25T00:00:00Z",
+          "2026-10-25T01:00:00Z",
           "2026-10-25T02:00:00Z",
           "2026-10-25T03:00:00Z",
         ],
-        pm2_5: [12.0, 15.5, null, 18.2, null, 20.1], // Includes null missing measurements
+        pm2_5: [12.0, 15.5, null, 18.2, null, 20.1],
         us_aqi: [50, 58, null, 64, null, 68],
       },
     };
@@ -45,7 +44,6 @@ describe("forecast normalization and time handling", () => {
     expect(forecast.timeZone).toBe("Europe/London");
     expect(forecast.hourly.length).toBe(6);
 
-    // Assert that absolute timestamps are distinct and in order
     const timestamps = forecast.hourly.map((h) => h.at);
     const uniqueTimestamps = Array.from(new Set(timestamps));
     expect(uniqueTimestamps.length).toBe(timestamps.length);
@@ -56,24 +54,74 @@ describe("forecast normalization and time handling", () => {
       expect(curr).toBeGreaterThan(prev);
     }
 
-    // Assert missing measurements stay null
     expect(forecast.hourly[2].pm25).toBeNull();
     expect(forecast.hourly[2].usAqi).toBeNull();
     expect(forecast.hourly[4].pm25).toBeNull();
     expect(forecast.hourly[4].usAqi).toBeNull();
 
-    // Assert display uses the selected location's time zone
-    // For 2026-10-25T00:00:00Z, in London (BST, UTC+1 before 2am), local time is 1:00 AM
     const formattedDisplay = formatHourlyTime(forecast.hourly[2].at, "Europe/London");
     expect(formattedDisplay).toMatch(/1:00\s?(AM|am)/i);
 
-    // In Asia/Kolkata (UTC+5:30), same instant is 5:30 AM
     const kolkataDisplay = formatHourlyTime(forecast.hourly[2].at, "Asia/Kolkata");
     expect(kolkataDisplay).toMatch(/5:30\s?(AM|am)/i);
   });
 
+  it("providerNaiveIsoTimestampsDisplayCorrectLocalHourInTokyoAndDelhiEvenOnUtcServer: a 2:00 PM local reading must display as 2:00 PM", () => {
+    // Open-Meteo returns naive local strings like "2026-11-18T14:00" when timezone=auto is requested
+    const tokyoRaw: OpenMeteoAirQualityResponse = {
+      latitude: 35.6895,
+      longitude: 139.6917,
+      timezone: "Asia/Tokyo",
+      current: { time: "2026-11-18T14:00", pm2_5: 18, us_aqi: 60 },
+      hourly: {
+        time: ["2026-11-18T14:00", "2026-11-18T15:00"],
+        pm2_5: [18, 16],
+        us_aqi: [60, 55],
+      },
+    };
+
+    const tokyoForecast = normalizeForecast(tokyoRaw, 35.6895, 139.6917, "Asia/Tokyo");
+    // In Tokyo, 2026-11-18 14:00 must format as 2:00 PM
+    const tokyoFormatted = formatHourlyTime(tokyoForecast.hourly[0].at, "Asia/Tokyo");
+    expect(tokyoFormatted).toMatch(/2:00\s?(PM|pm)/i);
+
+    // Same test for Delhi (Asia/Kolkata, UTC+5:30)
+    const delhiRaw: OpenMeteoAirQualityResponse = {
+      latitude: 28.6139,
+      longitude: 77.209,
+      timezone: "Asia/Kolkata",
+      current: { time: "2026-11-18T14:00", pm2_5: 120, us_aqi: 184 },
+      hourly: {
+        time: ["2026-11-18T14:00", "2026-11-18T15:00"],
+        pm2_5: [120, 110],
+        us_aqi: [184, 178],
+      },
+    };
+
+    const delhiForecast = normalizeForecast(delhiRaw, 28.6139, 77.209, "Asia/Kolkata");
+    const delhiFormatted = formatHourlyTime(delhiForecast.hourly[0].at, "Asia/Kolkata");
+    expect(delhiFormatted).toMatch(/2:00\s?(PM|pm)/i);
+  });
+
+  it("shows the date where the forecast crosses midnight", () => {
+    // Two timestamps crossing midnight in Tokyo: 23:00 on Nov 18 and 01:00 on Nov 19
+    const instantBeforeMidnight = parseTimeToUtcInstant("2026-11-18T23:00", "Asia/Tokyo");
+    const instantAfterMidnight = parseTimeToUtcInstant("2026-11-19T01:00", "Asia/Tokyo");
+
+    const beforeDisplay = formatHourlyTimeWithDate(instantBeforeMidnight, "Asia/Tokyo");
+    const afterDisplay = formatHourlyTimeWithDate(instantAfterMidnight, "Asia/Tokyo");
+
+    expect(beforeDisplay.time).toMatch(/11:00\s?(PM|pm)/i);
+    expect(beforeDisplay.date).toContain("Nov 18");
+
+    expect(afterDisplay.time).toMatch(/1:00\s?(AM|am)/i);
+    expect(afterDisplay.date).toContain("Nov 19");
+
+    // Clear distinction across midnight
+    expect(afterDisplay.isNextDay).toBe(true);
+  });
+
   it("fetches and bounds forecast up to 24 future hourly slots", async () => {
-    // Generate 48 hours of mock data
     const times: string[] = [];
     const pm25s: number[] = [];
     const aqis: number[] = [];

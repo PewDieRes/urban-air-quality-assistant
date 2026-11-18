@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchLocations } from "@/lib/location/search";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  if (rateLimitResponse) return rateLimitResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q") ?? "";

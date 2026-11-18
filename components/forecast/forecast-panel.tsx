@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { Forecast, AirSample, getAqiCategory } from "@/lib/forecast/types";
-import { formatHourlyTime } from "@/lib/forecast/open-meteo";
-import { Wind, AlertTriangle, RefreshCw, Clock, Info, ArrowUpRight } from "lucide-react";
+import { formatHourlyTimeWithDate, resetTimeFormatTracker } from "@/lib/forecast/open-meteo";
+import { Wind, AlertTriangle, RefreshCw, Clock, Info, ArrowUpRight, Calendar } from "lucide-react";
 
 interface ForecastPanelProps {
   lat: number;
@@ -52,6 +52,9 @@ export function ForecastPanel({
   const currentAqi = forecast?.current?.usAqi ?? null;
   const currentPm25 = forecast?.current?.pm25 ?? null;
   const currentCategory = getAqiCategory(currentAqi);
+
+  // Reset time tracker before rendering hourly series to ensure accurate midnight crossing detection
+  resetTimeFormatTracker();
 
   return (
     <section
@@ -121,42 +124,41 @@ export function ForecastPanel({
           <button
             type="button"
             onClick={fetchForecast}
-            className="px-3 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-xs text-white transition border border-rose-700"
+            className="px-3 py-1 bg-rose-900/60 hover:bg-rose-800 text-xs font-medium rounded-lg border border-rose-700 transition"
           >
             Retry
           </button>
         </div>
       )}
 
-      {/* Current Conditions card */}
+      {/* Main summary cards */}
       {forecast && (
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
           <div
-            className={`col-span-1 md:col-span-1 rounded-xl p-4 border flex flex-col justify-between ${currentCategory.bgClass} ${currentCategory.borderClass}`}
+            className={`rounded-xl p-4 border flex flex-col justify-between ${currentCategory.bgClass} ${currentCategory.borderClass}`}
           >
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs uppercase font-bold tracking-wider text-slate-300">
-                  Current AQI
-                </span>
-                <span className="text-[11px] text-slate-400 font-mono">
-                  US AQI Scale
-                </span>
-              </div>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span
-                  data-testid="current-aqi-value"
-                  className={`text-4xl font-extrabold ${currentCategory.colorClass}`}
-                >
-                  {currentAqi !== null ? currentAqi : "—"}
-                </span>
-                <span className="text-sm font-semibold text-slate-200">
-                  {currentCategory.category}
-                </span>
-              </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase font-bold tracking-wider text-slate-300">
+                Current US AQI
+              </span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-black/30 text-slate-300">
+                0-500 scale
+              </span>
             </div>
 
-            <div className="mt-3 pt-3 border-t border-slate-700/40 text-xs text-slate-300">
+            <div className="my-2 flex items-baseline gap-2">
+              <span
+                data-testid="current-aqi-value"
+                className={`text-4xl font-extrabold ${currentCategory.colorClass}`}
+              >
+                {currentAqi !== null ? currentAqi : "—"}
+              </span>
+              <span className={`text-sm font-semibold ${currentCategory.colorClass}`}>
+                {currentCategory.category}
+              </span>
+            </div>
+
+            <div className="text-xs text-slate-300 leading-snug">
               {currentCategory.description}
             </div>
           </div>
@@ -190,7 +192,7 @@ export function ForecastPanel({
         </div>
       )}
 
-      {/* Accessible 24-hour Hourly Forecast List */}
+      {/* Accessible 24-hour Hourly Forecast List with midnight date indicator */}
       {forecast && forecast.hourly && forecast.hourly.length > 0 && (
         <div className="mt-6">
           <div className="flex items-center justify-between mb-2">
@@ -210,21 +212,27 @@ export function ForecastPanel({
             {forecast.hourly.map((sample, idx) => {
               const cat = getAqiCategory(sample.usAqi);
               const isSelected = selectedInstant === sample.at;
-              const formattedTime = formatHourlyTime(sample.at, forecast.timeZone);
+              const timeInfo = formatHourlyTimeWithDate(sample.at, forecast.timeZone);
 
               return (
                 <button
                   key={sample.at || idx}
                   type="button"
                   onClick={() => onSelectHour && onSelectHour(sample)}
-                  className={`flex-shrink-0 w-24 p-2.5 rounded-xl border text-center transition flex flex-col items-center justify-between ${
+                  className={`flex-shrink-0 w-28 p-2.5 rounded-xl border text-center transition flex flex-col items-center justify-between relative ${
                     isSelected
                       ? "ring-2 ring-emerald-400 border-emerald-500 bg-slate-800"
                       : "border-slate-800 hover:border-slate-700 bg-slate-900/80"
                   }`}
                 >
+                  {timeInfo.isNextDay && (
+                    <span className="text-[10px] font-semibold text-sky-400 bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/40 mb-1 flex items-center gap-1">
+                      <Calendar className="w-2.5 h-2.5" />
+                      {timeInfo.date}
+                    </span>
+                  )}
                   <span className="text-xs text-slate-300 font-medium">
-                    {formattedTime}
+                    {timeInfo.time}
                   </span>
 
                   <div className="my-1.5 flex flex-col items-center">
@@ -238,9 +246,9 @@ export function ForecastPanel({
                     </span>
                   </div>
 
-                  <div className="text-[11px] text-slate-400 font-mono">
-                    {sample.pm25 !== null ? `${sample.pm25.toFixed(0)} µg` : "No est."}
-                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {sample.pm25 !== null ? `${sample.pm25.toFixed(0)} µg/m³` : "—"}
+                  </span>
                 </button>
               );
             })}

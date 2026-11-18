@@ -32,6 +32,7 @@ export interface PlanInput {
   activities: FlexibleActivity[];
   fixedCommitments?: FixedCommitment[];
   transport?: TransportDetails;
+  availableTransportModes?: TransportMode[];
   household?: HouseholdDetails;
   budget?: "low" | "medium" | "high";
 }
@@ -39,6 +40,7 @@ export interface PlanInput {
 export interface ActivityFacts {
   id: string;
   title: string;
+  durationMinutes: number;
   eligibleCandidates: AirSample[];
   bestCandidate: AirSample | null;
   reason: string;
@@ -47,14 +49,32 @@ export interface ActivityFacts {
 export interface TransportComparison {
   baselineMode: string;
   suggestedMode: string;
+  distanceKm: number | null;
   estimatedCo2KgSaved: number | null;
+  units: string;
+  factorSource: string;
+  assumptions: string;
+  isEstimate: boolean;
+  impactType: "lower_exposure" | "lower_emissions" | "both";
   explanation: string;
+}
+
+export interface BeforeAfterComparison {
+  activityId: string;
+  activityTitle: string;
+  baselineTime: string;
+  baselinePm25: number | null;
+  optimizedTime: string;
+  optimizedPm25: number | null;
+  exposureReductionPercent: number | null;
+  justification: string;
 }
 
 export interface PlanFacts {
   fixedCommitments: FixedCommitment[];
   activities: ActivityFacts[];
   transportComparison: TransportComparison | null;
+  beforeAfterComparison: BeforeAfterComparison | null;
   indoorRecommendations: string[];
   generatedAt: string;
   locationTimezone: string;

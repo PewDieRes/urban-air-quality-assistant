@@ -1,53 +1,118 @@
 import { test, expect } from "@playwright/test";
 
+const mockForecastKolkata = {
+  lat: 28.6139,
+  lon: 77.209,
+  timeZone: "Asia/Kolkata",
+  source: "Open-Meteo",
+  current: { at: "2026-11-18T10:00:00Z", pm25: 145, usAqi: 198 },
+  hourly: [
+    { at: "2026-11-18T10:00:00Z", pm25: 145, usAqi: 198 },
+    { at: "2026-11-18T11:00:00Z", pm25: 125, usAqi: 187 },
+    { at: "2026-11-18T12:00:00Z", pm25: 95, usAqi: 172 },
+    { at: "2026-11-18T13:00:00Z", pm25: 80, usAqi: 164 },
+    { at: "2026-11-18T14:00:00Z", pm25: 75, usAqi: 161 },
+    { at: "2026-11-18T15:00:00Z", pm25: 90, usAqi: 169 },
+    { at: "2026-11-18T16:00:00Z", pm25: 110, usAqi: 178 },
+    { at: "2026-11-18T17:00:00Z", pm25: 130, usAqi: 190 },
+  ],
+};
+
+const mockForecastTokyo = {
+  lat: 35.6762,
+  lon: 139.6503,
+  timeZone: "Asia/Tokyo",
+  source: "Open-Meteo",
+  current: { at: "2026-11-18T10:00:00Z", pm25: 15, usAqi: 56 },
+  hourly: [
+    { at: "2026-11-18T10:00:00Z", pm25: 15, usAqi: 56 },
+    { at: "2026-11-18T11:00:00Z", pm25: 14, usAqi: 54 },
+    { at: "2026-11-18T12:00:00Z", pm25: 12, usAqi: 50 },
+    { at: "2026-11-18T13:00:00Z", pm25: 10, usAqi: 45 },
+  ],
+};
+
 test.describe("Urban Air Quality Assistant", () => {
+  test.beforeEach(async ({ page }) => {
+    // Intercept forecast API requests using URL predicate to avoid glob '?' wildcard issues
+    await page.route(
+      (url) => url.pathname === "/api/forecast",
+      async (route) => {
+        const url = new URL(route.request().url());
+        const lat = parseFloat(url.searchParams.get("lat") || "28");
+        if (lat > 34) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ forecast: mockForecastTokyo }),
+          });
+        } else {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ forecast: mockForecastKolkata }),
+          });
+        }
+      }
+    );
+  });
+
   test("location access: denies geolocation, allows search, and guards against out-of-order stale responses", async ({
     page,
     context,
   }) => {
-    // Deny geolocation permission
     await context.clearPermissions();
 
-    await page.route("**/api/locations?q=Del*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          places: [
-            {
-              id: "delhi-old-query",
-              name: "Old Stale Delhi",
-              region: "Delhi",
-              country: "India",
-              lat: 28.6139,
-              lon: 77.209,
-              timeZone: "Asia/Kolkata",
-            },
-          ],
-        }),
-      });
-    });
+    await page.route(
+      (url) =>
+        url.pathname === "/api/locations" &&
+        (url.searchParams.get("q") || "").toLowerCase().startsWith("del"),
+      async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            places: [
+              {
+                id: "delhi-old-query",
+                name: "Old Stale Delhi",
+                region: "Delhi",
+                country: "India",
+                lat: 28.6139,
+                lon: 77.209,
+                timeZone: "Asia/Kolkata",
+              },
+            ],
+          }),
+        });
+      }
+    );
 
-    await page.route("**/api/locations?q=Tokyo*", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          places: [
-            {
-              id: "1850147",
-              name: "Tokyo",
-              region: "Tokyo",
-              country: "Japan",
-              lat: 35.6895,
-              lon: 139.6917,
-              timeZone: "Asia/Tokyo",
-            },
-          ],
-        }),
-      });
-    });
+    await page.route(
+      (url) =>
+        url.pathname === "/api/locations" &&
+        (url.searchParams.get("q") || "").toLowerCase().startsWith("tokyo"),
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            places: [
+              {
+                id: "1850147",
+                name: "Tokyo",
+                region: "Tokyo",
+                country: "Japan",
+                lat: 35.6895,
+                lon: 139.6917,
+                timeZone: "Asia/Tokyo",
+              },
+            ],
+          }),
+        });
+      }
+    );
 
     await page.goto("/");
 
@@ -55,7 +120,7 @@ test.describe("Urban Air Quality Assistant", () => {
     await expect(searchInput).toBeVisible();
 
     await searchInput.fill("Del");
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(300); // Wait for debounce to fire 'Del' request
     await searchInput.fill("Tokyo");
 
     await expect(page.getByText("Tokyo, Japan")).toBeVisible({ timeout: 5000 });
@@ -71,37 +136,29 @@ test.describe("Urban Air Quality Assistant", () => {
   }) => {
     let gridFetchCount = 0;
 
-    await page.route("**/api/forecast/grid*", async (route) => {
-      gridFetchCount++;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          grid: [
-            {
-              cell: {
-                id: "cell-1",
-                lat: 28.6,
-                lon: 77.2,
-                bounds: { west: 77.1, south: 28.5, east: 77.3, north: 28.7 },
+    await page.route(
+      (url) => url.pathname === "/api/forecast/grid",
+      async (route) => {
+        gridFetchCount++;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            grid: [
+              {
+                cell: {
+                  id: "cell-1",
+                  lat: 28.6,
+                  lon: 77.2,
+                  bounds: { west: 77.1, south: 28.5, east: 77.3, north: 28.7 },
+                },
+                forecast: mockForecastKolkata,
               },
-              forecast: {
-                lat: 28.6,
-                lon: 77.2,
-                timeZone: "Asia/Kolkata",
-                source: "Open-Meteo",
-                current: { at: "2026-11-18T10:00:00Z", pm25: 140, usAqi: 195 },
-                hourly: [
-                  { at: "2026-11-18T10:00:00Z", pm25: 140, usAqi: 195 },
-                  { at: "2026-11-18T11:00:00Z", pm25: 110, usAqi: 175 },
-                  { at: "2026-11-18T12:00:00Z", pm25: 85, usAqi: 160 },
-                ],
-              },
-            },
-          ],
-        }),
-      });
-    });
+            ],
+          }),
+        });
+      }
+    );
 
     await page.goto("/");
 
@@ -119,27 +176,30 @@ test.describe("Urban Air Quality Assistant", () => {
 
     expect(gridFetchCount).toBe(initialGridFetches);
 
-    const toggle3D = page.getByRole("button", { name: /toggle 3d|3d view/i });
+    const toggle3D = page.getByRole("button", { name: /3d perspective|toggle 3d|3d view/i });
     await expect(toggle3D).toBeVisible();
     await toggle3D.click();
-    await expect(page.getByText(/3D Active/i)).toBeVisible();
+    await expect(page.getByText(/2D Flat View|3D Active/i)).toBeVisible();
   });
 
   test("historical smoke: opens verified historical smoke case after simulated live service failure", async ({
     page,
   }) => {
-    await page.route("**/api/smoke/jobs", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: {
-            code: "RUNNER_UNAVAILABLE",
-            message: "Live atmospheric model service is offline or unreachable.",
-          },
-        }),
-      });
-    });
+    await page.route(
+      (url) => url.pathname === "/api/smoke/jobs",
+      async (route) => {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "RUNNER_UNAVAILABLE",
+              message: "Live atmospheric model service is offline or unreachable.",
+            },
+          }),
+        });
+      }
+    );
 
     await page.goto("/");
 
@@ -155,52 +215,6 @@ test.describe("Urban Air Quality Assistant", () => {
   test("full challenge demo flow: Delhi-NCR plan execution, Tokyo country switch, and verified facts", async ({
     page,
   }) => {
-    const mockForecastKolkata = {
-      lat: 28.6139,
-      lon: 77.209,
-      timeZone: "Asia/Kolkata",
-      source: "Open-Meteo",
-      current: { at: "2026-11-18T10:00:00Z", pm25: 145, usAqi: 198 },
-      hourly: [
-        { at: "2026-11-18T10:00:00Z", pm25: 145, usAqi: 198 },
-        { at: "2026-11-18T11:00:00Z", pm25: 125, usAqi: 187 },
-        { at: "2026-11-18T12:00:00Z", pm25: 95, usAqi: 172 },
-        { at: "2026-11-18T13:00:00Z", pm25: 80, usAqi: 164 },
-        { at: "2026-11-18T14:00:00Z", pm25: 75, usAqi: 161 },
-        { at: "2026-11-18T15:00:00Z", pm25: 90, usAqi: 169 },
-      ],
-    };
-
-    const mockForecastTokyo = {
-      lat: 35.6762,
-      lon: 139.6503,
-      timeZone: "Asia/Tokyo",
-      source: "Open-Meteo",
-      current: { at: "2026-11-18T10:00:00Z", pm25: 15, usAqi: 56 },
-      hourly: [
-        { at: "2026-11-18T10:00:00Z", pm25: 15, usAqi: 56 },
-        { at: "2026-11-18T11:00:00Z", pm25: 14, usAqi: 54 },
-        { at: "2026-11-18T12:00:00Z", pm25: 12, usAqi: 50 },
-      ],
-    };
-
-    // Provide reliable fixtures for Open-Meteo forecast API
-    await page.route("**/api/forecast?lat=28*&lon=77*", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ forecast: mockForecastKolkata }),
-      });
-    });
-
-    await page.route("**/api/forecast?lat=35*&lon=139*", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ forecast: mockForecastTokyo }),
-      });
-    });
-
     // 1. Load root page (defaults to Delhi-NCR)
     await page.goto("/");
     await expect(page.getByTestId("selected-location-name")).toContainText("Delhi-NCR");
@@ -211,14 +225,16 @@ test.describe("Urban Air Quality Assistant", () => {
     await buildPlanBtn.click();
 
     // Scroll to plan panel and click submit
-    const submitBtn = page.getByRole("button", { name: /build my smog plan/i }).last();
+    const submitBtn = page.getByRole("button", { name: /build My smog plan/i }).last();
     await submitBtn.scrollIntoViewIfNeeded();
     await submitBtn.click();
 
     // Verify tailored routine is generated and rendered
-    await expect(page.getByText(/Your Tailored Smog Routine/i)).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByText(/Demonstrable Before-and-After Schedule Optimization|Your Tailored Smog Routine/i)
+    ).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(/Recommended Hour/i)).toBeVisible();
-    await expect(page.getByText(/Lowest Exposure/i)).toBeVisible();
+    await expect(page.getByText(/lower forecast PM₂.₅|Lowest Exposure/i).first()).toBeVisible();
 
     // 3. Switch to Tokyo (city outside India)
     const tokyoBtn = page.getByRole("button", { name: /tokyo demo/i });

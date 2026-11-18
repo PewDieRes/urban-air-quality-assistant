@@ -7,7 +7,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8)](https://tailwindcss.com/)
 [![Vitest](https://img.shields.io/badge/Vitest-2.1-green)](https://vitest.dev/)
 [![Playwright](https://img.shields.io/badge/Playwright-1.49-purple)](https://playwright.dev/)
-[![Google Gemini](https://img.shields.io/badge/Gemini-1.5_Flash-orange)](https://deepmind.google/technologies/gemini/)
+[![Google Gemini](https://img.shields.io/badge/Gemini-3.8_Flash-orange)](https://deepmind.google/technologies/gemini/)
 
 ---
 
@@ -43,7 +43,7 @@
 - **Frontend & API:** Next.js 14 App Router, React 18, TypeScript, Tailwind CSS, Lucide Icons
 - **Mapping:** MapLibre GL JS, OpenFreeMap vector tiles
 - **Environmental Data:** Open-Meteo Air Quality API, NASA FIRMS
-- **GenAI Reasoning:** Google Gemini 1.5 Flash via REST API with strict Zod schema validation
+- **GenAI Reasoning:** Google Gemini 3.8 Flash via REST API (`GEMINI_MODEL="gemini-3.8-flash"`) with strict Zod schema validation, grounded server-side facts, and deterministic fallback
 - **Atmospheric Modeling:** NOAA HYSPLIT, Python 3.11, FastAPI, Pydantic, Docker
 - **Testing:** Vitest (unit & integration), Playwright (browser end-to-end), Pytest (Python runner)
 
@@ -89,8 +89,8 @@ npm run typecheck
 # Run ESLint
 npm run lint
 
-# Run Python HYSPLIT runner tests
-python -B -m pytest services/smoke/tests -q
+# Run Python HYSPLIT runner tests (from services/smoke working directory)
+cd services/smoke && python -B -m pytest tests -q
 
 # Build production bundle
 npm run build

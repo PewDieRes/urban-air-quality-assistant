@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { generatePlan, validatePlanNarrative } from "@/lib/plan/gemini";
+import {
+  generatePlan,
+  validateAndSanitizePlanNarrative,
+  buildDeterministicNarrative,
+} from "@/lib/plan/gemini";
 import { PlanInput, PlanFacts, PlanNarrative } from "@/lib/plan/types";
 
 describe("grounded plan generation and validation", () => {
@@ -18,19 +22,36 @@ describe("grounded plan generation and validation", () => {
       {
         id: "act-grocery",
         title: "Grocery trip",
+        durationMinutes: 60,
         eligibleCandidates: [
           { at: "2026-11-18T16:00:00Z", pm25: 110, usAqi: 178 },
           { at: "2026-11-18T18:00:00Z", pm25: 80, usAqi: 164 },
         ],
         bestCandidate: { at: "2026-11-18T18:00:00Z", pm25: 80, usAqi: 164 },
-        reason: "Lowest PM2.5 within grocery window",
+        reason: "Optimal slot at 2026-11-18T18:00:00Z with lower forecast PM₂.₅ (80 µg/m³)",
       },
     ],
     transportComparison: {
-      baselineMode: "Private Car",
+      baselineMode: "Private Petrol/Diesel Car",
       suggestedMode: "Public Transit / Metro",
-      estimatedCo2KgSaved: 1.5,
-      explanation: "Saves 1.5 kg CO2 over 10 km.",
+      distanceKm: 10,
+      estimatedCo2KgSaved: 1.3,
+      units: "kg CO₂e",
+      factorSource: "Regional DEFRA factors",
+      assumptions: "Car 0.17 vs Transit 0.04 kg CO2e/km",
+      isEstimate: true,
+      impactType: "both",
+      explanation: "Saves 1.3 kg CO₂e over 10 km.",
+    },
+    beforeAfterComparison: {
+      activityId: "act-grocery",
+      activityTitle: "Grocery trip",
+      baselineTime: "2026-11-18T16:00:00Z",
+      baselinePm25: 110,
+      optimizedTime: "2026-11-18T18:00:00Z",
+      optimizedPm25: 80,
+      exposureReductionPercent: 27,
+      justification: "Rescheduling achieves 27% lower particulate exposure",
     },
     indoorRecommendations: [
       "Operate HEPA air purifier on medium/high during evening peak hours.",
@@ -57,16 +78,101 @@ describe("grounded plan generation and validation", () => {
     vi.restoreAllMocks();
   });
 
-  it("invalidGenerationReturnsFacts: rejects hallucinated fact IDs or malformed output and falls back to verified facts", () => {
-    // Malformed object missing required fields
-    const malformed = {
-      summary: "Some text",
-      items: "not-an-array",
+  it("inventedTimeOrMeasurementNeverAppears: sanitizes model hallucination and strictly renders application ground truth", () => {
+    // Model output uses valid fact ID 'act-grocery', but invents '3:00 AM' and '15 µg/m³'
+    const hallucinatedRaw = {
+      summary: "Household smog action plan for evening.",
+      items: [
+        {
+          id: "rec-routine",
+          category: "routine",
+          action: "Do grocery trip at 3:00 AM with invented PM2.5 of 15 µg/m³",
+          whyItHelps: "Very low smog in the dead of night",
+          beneficiary: "All occupants",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-indoor",
+          category: "indoor",
+          action: "Keep bedroom air purifier running on high",
+          whyItHelps: "Reduces PM2.5 penetration",
+          beneficiary: "Sensitive occupants",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-transport",
+          category: "transport",
+          action: "Take Delhi Metro instead of driving car",
+          whyItHelps: "Lowers personal exposure and tailpipe emissions",
+          beneficiary: "Commuters",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-impact",
+          category: "direct_impact",
+          action: "Reschedule heavy aerobic workout indoors",
+          whyItHelps: "Reduces deep alveolar particulate deposition",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+        },
+      ],
     };
-    expect(validatePlanNarrative(malformed, sampleFacts)).toBeNull();
 
-    // Hallucinated fact ID not present in sampleFacts.activities
-    const hallucinatedFact = {
+    const sanitized = validateAndSanitizePlanNarrative(hallucinatedRaw, sampleFacts);
+    expect(sanitized).not.toBeNull();
+
+    const routineItem = sanitized?.items.find((i) => i.category === "routine");
+    expect(routineItem).toBeDefined();
+
+    // The invented text must NEVER appear
+    expect(routineItem?.action).not.toContain("3:00 AM");
+    expect(routineItem?.action).not.toContain("15 µg/m³");
+
+    // The verified application facts MUST appear instead (18:00 UTC = 11:30 PM in Asia/Kolkata, PM2.5 = 80 µg/m³)
+    expect(routineItem?.action).toContain("11:30 PM");
+    expect(routineItem?.action).toContain("80 µg/m³");
+    expect(routineItem?.whyItHelps).toContain("lower forecast PM₂.₅");
+  });
+
+  it("rejects missing categories and requires all 4 categories: routine, indoor, transport, direct_impact", () => {
+    // Missing 'direct_impact' category
+    const missingCategory = {
+      summary: "Incomplete plan",
+      items: [
+        {
+          id: "rec-1",
+          category: "routine",
+          action: "Grocery trip at verified hour",
+          whyItHelps: "Low exposure",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Run HEPA filter",
+          whyItHelps: "Clean air",
+          beneficiary: "All",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Use public metro",
+          whyItHelps: "Zero car emissions",
+          beneficiary: "Community",
+          impactType: "lower_emissions",
+        },
+      ],
+    };
+
+    expect(validateAndSanitizePlanNarrative(missingCategory, sampleFacts)).toBeNull();
+  });
+
+  it("rejects hallucinated fact IDs not present in facts", () => {
+    const hallucinatedFactId = {
       summary: "Plan summary",
       items: [
         {
@@ -76,61 +182,124 @@ describe("grounded plan generation and validation", () => {
           whyItHelps: "Lower smog",
           beneficiary: "All",
           impactType: "lower_exposure",
-          evidenceFactId: "invented-nonexistent-fact-id",
+          evidenceFactId: "fake-nonexistent-act-id",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Run HEPA",
+          whyItHelps: "Clean air",
+          beneficiary: "All",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Use metro",
+          whyItHelps: "Lower emissions",
+          beneficiary: "All",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-4",
+          category: "direct_impact",
+          action: "Avoid exercise",
+          whyItHelps: "Avoid lung stress",
+          beneficiary: "All",
+          impactType: "lower_exposure",
         },
       ],
     };
-    expect(validatePlanNarrative(hallucinatedFact, sampleFacts)).toBeNull();
+
+    expect(validateAndSanitizePlanNarrative(hallucinatedFactId, sampleFacts)).toBeNull();
   });
 
-  it("validates and accepts grounded structured output covering daily routine, indoor air, sustainable alternatives, and direct impact", async () => {
-    const validNarrative: PlanNarrative = {
-      summary: "Tailored air quality schedule for Delhi-NCR prioritizing off-peak exposure.",
+  it("falls back to deterministic narrative on upstream provider error", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+    });
+
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
+
+    expect(result.status).toBe("deterministic_fallback");
+    expect(result.fallbackReason).toBe("provider_error");
+    expect(result.modelUsed).toBeNull();
+    expect(result.narrative.items).toHaveLength(4);
+
+    const categories = result.narrative.items.map((i) => i.category);
+    expect(categories).toContain("routine");
+    expect(categories).toContain("indoor");
+    expect(categories).toContain("transport");
+    expect(categories).toContain("direct_impact");
+  });
+
+  it("falls back to deterministic narrative on malformed output", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "This is not valid JSON {{{" }] } }],
+      }),
+    });
+
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
+
+    expect(result.status).toBe("deterministic_fallback");
+    expect(result.fallbackReason).toBe("invalid_output");
+  });
+
+  it("produces successful gemini_generated status when Gemini responds with valid structured JSON", async () => {
+    const validJsonString = JSON.stringify({
+      summary: "Verified personalized smog plan for family in Delhi.",
       items: [
         {
-          id: "item-routine",
+          id: "rec-routine",
           category: "routine",
-          action: "Schedule Grocery trip at 18:00",
-          whyItHelps: "PM2.5 drops to 80 µg/m³ compared to 110 µg/m³ at 16:00",
+          action: "Schedule Grocery trip at 11:30 PM",
+          whyItHelps: "Lower forecast PM2.5 of 80 ug/m3",
           beneficiary: "Entire household",
           impactType: "lower_exposure",
           evidenceFactId: "act-grocery",
         },
         {
-          id: "item-indoor",
+          id: "rec-indoor",
           category: "indoor",
-          action: "Run HEPA filtration in living spaces during peak evening smog",
-          whyItHelps: "Reduces indoor particulate infiltration by up to 90%",
-          beneficiary: "Sensitive children and elderly members",
+          action: "Operate HEPA purifier on high in bedrooms",
+          whyItHelps: "Prevents particulate infiltration",
+          beneficiary: "Children and sensitive members",
           impactType: "health_protection",
         },
         {
-          id: "item-transport",
+          id: "rec-transport",
           category: "transport",
-          action: "Choose Metro or public transit over private vehicle",
-          whyItHelps: "Avoids adding direct vehicle exhaust to roadside smog",
-          beneficiary: "Local community",
+          action: "Switch commute to Delhi Metro",
+          whyItHelps: "Saves 1.3 kg CO2e over 10 km",
+          beneficiary: "Commuter and community",
           impactType: "lower_emissions",
         },
         {
-          id: "item-impact",
+          id: "rec-impact",
           category: "direct_impact",
-          action: "Avoid outdoor exercise when US AQI exceeds 150",
-          whyItHelps: "Significantly lowers inhaled particulate dosage",
-          beneficiary: "Cardiovascular and respiratory health",
+          action: "Reschedule grocery trip to avoid peak evening smog",
+          whyItHelps: "Cuts particulate exposure by 27%",
+          beneficiary: "Family health",
           impactType: "lower_exposure",
         },
       ],
-    };
+    });
 
-    const validated = validatePlanNarrative(validNarrative, sampleFacts);
-    expect(validated).not.toBeNull();
-    expect(validated?.items).toHaveLength(4);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: validJsonString }] } }],
+      }),
+    });
 
-    const categories = validated?.items.map((i) => i.category);
-    expect(categories).toContain("routine");
-    expect(categories).toContain("indoor");
-    expect(categories).toContain("transport");
-    expect(categories).toContain("direct_impact");
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
+
+    expect(result.status).toBe("gemini_generated");
+    expect(result.modelUsed).toBe("gemini-3.8-flash");
+    expect(result.narrative.items).toHaveLength(4);
   });
 });

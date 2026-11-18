@@ -174,8 +174,12 @@ export function LocationPicker({
         )}
 
         <div className="relative">
+          <label htmlFor="location-search-input" className="sr-only">
+            Search city or location
+          </label>
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
+            id="location-search-input"
             type="text"
             role="textbox"
             aria-label="Search city or location"

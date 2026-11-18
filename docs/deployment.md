@@ -5,6 +5,7 @@
 - **Target Platform:** Vercel Hobby tier
 - **Environment Variables:**
   - `GEMINI_API_KEY`: Google Gemini API key for structured planning narratives and smoke explanations.
+  - `GEMINI_MODEL`: Model identifier (defaults to `gemini-3.8-flash`).
   - `FIRMS_MAP_KEY`: NASA FIRMS Map Key for real-time VIIRS/MODIS fire detections.
   - `SMOKE_SERVICE_URL` (optional): URL of verified external HYSPLIT container service.
   - `SMOKE_SERVICE_TOKEN` (optional): Bearer credential for the runner.
@@ -28,4 +29,4 @@
 - [x] All unit test suites pass (`npm test`)
 - [x] Playwright browser end-to-end tests pass (`npm run test:e2e`)
 - [x] Next.js production build completes (`npm run build`)
-- [x] Python HYSPLIT adapter tests pass (`python -m pytest services/smoke/tests`)
+- [x] Python HYSPLIT adapter tests pass (`cd services/smoke && python -B -m pytest tests -q`)
