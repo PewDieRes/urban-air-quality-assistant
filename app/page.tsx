@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { LocationPicker } from "@/components/location/location-picker";
 import { ForecastPanel } from "@/components/forecast/forecast-panel";
 import { AirQualityMap } from "@/components/map/air-quality-map";
+import { PlanPanel } from "@/components/plan/plan-panel";
 import { Place, DEFAULT_PLACE, TOKYO_PLACE } from "@/lib/location/search";
 import { Forecast, AirSample } from "@/lib/forecast/types";
 import { Wind, Shield, Globe2, Sparkles, Flame, Navigation2 } from "lucide-react";
@@ -156,9 +157,14 @@ export default function HomePage() {
           />
         </section>
 
-        {/* Household Planner Anchor & Placeholder (Implemented in Milestone B) */}
+        {/* Household Planner Anchor & Panel */}
         <div ref={planRef} id="household-plan-section">
-          {/* Plan panel will be rendered here */}
+          <PlanPanel
+            forecast={forecast}
+            locationName={selectedPlace ? selectedPlace.name : "Selected Location"}
+            lat={coordinates.lat}
+            lon={coordinates.lon}
+          />
         </div>
 
         {/* Data Attribution & Disclaimers Footer */}
