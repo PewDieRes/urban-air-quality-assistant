@@ -7,7 +7,7 @@ import { AirQualityMap } from "@/components/map/air-quality-map";
 import { PlanPanel } from "@/components/plan/plan-panel";
 import { Place, DEFAULT_PLACE, TOKYO_PLACE } from "@/lib/location/search";
 import { Forecast, AirSample } from "@/lib/forecast/types";
-import { Wind, Shield, Globe2, Sparkles, Flame, Navigation2 } from "lucide-react";
+import { Wind, Shield, Globe2, Sparkles, Flame, Navigation2, MapPin } from "lucide-react";
 
 export default function HomePage() {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(DEFAULT_PLACE);
@@ -18,8 +18,21 @@ export default function HomePage() {
 
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [selectedInstant, setSelectedInstant] = useState<string | null>(null);
+  const [detectedPlace, setDetectedPlace] = useState<Place | null>(null);
 
   const planRef = useRef<HTMLDivElement>(null);
+
+  // Background auto-detect user's location to provide instant "My Location" option
+  useEffect(() => {
+    fetch("/api/locations/detect")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.place) {
+          setDetectedPlace(data.place);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch forecast whenever coordinates change
   const refreshForecast = useCallback(async () => {
@@ -109,6 +122,29 @@ export default function HomePage() {
               >
                 Tokyo Demo
               </button>
+              {detectedPlace &&
+                detectedPlace.name !== DEFAULT_PLACE.name &&
+                detectedPlace.name !== TOKYO_PLACE.name && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelectLocation(detectedPlace, {
+                        lat: detectedPlace.lat,
+                        lon: detectedPlace.lon,
+                      })
+                    }
+                    className={`px-2.5 py-1 rounded-lg font-medium transition flex items-center gap-1 ${
+                      selectedPlace?.id === detectedPlace.id ||
+                      selectedPlace?.name === detectedPlace.name
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-sky-400 hover:text-sky-200"
+                    }`}
+                    title={`Switch to detected location: ${detectedPlace.name}`}
+                  >
+                    <MapPin className="w-3 h-3 text-sky-400" />
+                    <span>{detectedPlace.name} (My Location)</span>
+                  </button>
+                )}
             </div>
 
             <div className="flex-1 min-w-[260px]">
@@ -144,13 +180,23 @@ export default function HomePage() {
               const customPlace: Place = {
                 id: `map-${coords.lat.toFixed(4)}-${coords.lon.toFixed(4)}`,
                 name: "Map Selection",
-                region: "Regional cell",
+                region: `${coords.lat.toFixed(2)}°, ${coords.lon.toFixed(2)}°`,
                 country: "",
                 lat: coords.lat,
                 lon: coords.lon,
                 timeZone: forecast?.timeZone || "UTC",
               };
               handleSelectLocation(customPlace, coords);
+
+              // Background reverse geocode to give the user the real area name
+              fetch(`/api/locations/reverse?lat=${coords.lat}&lon=${coords.lon}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((data) => {
+                  if (data?.place) {
+                    setSelectedPlace(data.place);
+                  }
+                })
+                .catch(() => {});
             }}
             selectedInstant={selectedInstant}
             onSelectInstant={(instant) => setSelectedInstant(instant)}

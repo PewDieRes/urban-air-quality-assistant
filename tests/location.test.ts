@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { searchLocations, formatPlaceLabel, type Place } from "@/lib/location/search";
+import {
+  searchLocations,
+  formatPlaceLabel,
+  detectLocationFromIp,
+  reverseGeocode,
+  type Place,
+} from "@/lib/location/search";
 
 describe("location search and disambiguation", () => {
   beforeEach(() => {
@@ -63,5 +69,50 @@ describe("location search and disambiguation", () => {
   it("handles upstream failure by throwing or returning graceful empty array without crashing", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
     await expect(searchLocations("Delhi")).rejects.toThrow();
+  });
+
+  it("detectLocationFromIp resolves location from IP provider response", async () => {
+    const mockIpResponse = {
+      success: true,
+      city: "Pune",
+      region: "Maharashtra",
+      country: "India",
+      latitude: 18.52,
+      longitude: 73.85,
+      timezone: { id: "Asia/Kolkata" },
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockIpResponse,
+    });
+
+    const place = await detectLocationFromIp("127.0.0.1");
+    expect(place).not.toBeNull();
+    expect(place?.name).toBe("Pune");
+    expect(place?.region).toBe("Maharashtra");
+    expect(place?.country).toBe("India");
+    expect(place?.lat).toBe(18.52);
+    expect(place?.lon).toBe(73.85);
+  });
+
+  it("reverseGeocode returns human-readable city from coordinates", async () => {
+    const mockNominatimResponse = {
+      address: {
+        city: "Pune",
+        state: "Maharashtra",
+        country: "India",
+      },
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockNominatimResponse,
+    });
+
+    const place = await reverseGeocode(18.52, 73.85);
+    expect(place.name).toBe("Pune");
+    expect(place.region).toBe("Maharashtra");
+    expect(place.country).toBe("India");
   });
 });

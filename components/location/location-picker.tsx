@@ -20,6 +20,7 @@ export function LocationPicker({
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
+  const [geoNotice, setGeoNotice] = useState<string | null>(null);
 
   // Guard against out-of-order stale responses
   const activeRequestIdRef = useRef<number>(0);
@@ -89,23 +90,70 @@ export function LocationPicker({
     setResults([]);
     setIsOpen(false);
     setGeoError(null);
+    setGeoNotice(null);
   };
 
+  const fallbackToIpDetection = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/locations/detect");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.place) {
+          onSelectLocation(data.place, { lat: data.place.lat, lon: data.place.lon });
+          setGeoNotice(
+            `Located near ${data.place.name}${data.place.country ? `, ${data.place.country}` : ""} (via network)`
+          );
+          setGeoError(null);
+          setIsOpen(false);
+          return true;
+        }
+      }
+    } catch {
+      // Fallback failed
+    }
+    return false;
+  }, [onSelectLocation]);
+
   const handleUseGeolocation = () => {
+    setIsLoading(true);
+    setGeoError(null);
+    setGeoNotice(null);
+
     if (!navigator.geolocation) {
-      setGeoError("Geolocation is not supported by your browser");
+      fallbackToIpDetection().then((ok) => {
+        setIsLoading(false);
+        if (!ok) {
+          setGeoError("Geolocation is not supported by your browser. Search for your city below.");
+        }
+      });
       return;
     }
 
-    setIsLoading(true);
-    setGeoError(null);
+    let resolved = false;
+
+    // Fast fallback if browser GPS takes more than 3.5s (e.g. desktop PC without GPS)
+    const fallbackTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        fallbackToIpDetection().then((ok) => {
+          setIsLoading(false);
+          if (!ok) {
+            setGeoError("GPS acquisition timed out. Search for your city below.");
+          }
+        });
+      }
+    }, 3500);
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setIsLoading(false);
+      async (position) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(fallbackTimer);
+
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
-        const customPlace: Place = {
+
+        let customPlace: Place = {
           id: `custom-${lat.toFixed(4)}-${lon.toFixed(4)}`,
           name: "Current Location",
           region: "Browser Geolocation",
@@ -114,19 +162,41 @@ export function LocationPicker({
           lon,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         };
+
+        try {
+          const revRes = await fetch(`/api/locations/reverse?lat=${lat}&lon=${lon}`);
+          if (revRes.ok) {
+            const revData = await revRes.json();
+            if (revData.place) {
+              customPlace = revData.place;
+            }
+          }
+        } catch {
+          // Use default customPlace
+        }
+
+        setIsLoading(false);
         onSelectLocation(customPlace, { lat, lon });
+        setGeoNotice(`Located at ${customPlace.name}`);
         setIsOpen(false);
       },
-      (error) => {
+      async (error) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(fallbackTimer);
+
+        // When denied or unavailable on desktop, immediately try IP detection
+        const ok = await fallbackToIpDetection();
         setIsLoading(false);
-        // Geolocation denied or unavailable: keep manual city search usable
-        setGeoError(
-          error.code === error.PERMISSION_DENIED
-            ? "Location permission denied. Search for your city below."
-            : "Could not retrieve your location. Search for your city below."
-        );
+        if (!ok) {
+          setGeoError(
+            error.code === error.PERMISSION_DENIED
+              ? "Location permission denied. Search for your city below."
+              : "Could not retrieve your location. Search for your city below."
+          );
+        }
       },
-      { timeout: 10000, enableHighAccuracy: false }
+      { timeout: 3500, enableHighAccuracy: false }
     );
   };
 
@@ -167,9 +237,31 @@ export function LocationPicker({
           </button>
         </div>
 
+        {geoNotice && (
+          <div className="text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-800/50 rounded-lg px-3 py-1.5 flex items-center justify-between">
+            <span>{geoNotice}</span>
+            <button
+              type="button"
+              onClick={() => setGeoNotice(null)}
+              className="text-emerald-400 hover:text-emerald-200 ml-2"
+              aria-label="Dismiss notice"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {geoError && (
-          <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-1.5">
-            {geoError}
+          <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-1.5 flex items-center justify-between">
+            <span>{geoError}</span>
+            <button
+              type="button"
+              onClick={() => setGeoError(null)}
+              className="text-amber-400 hover:text-amber-200 ml-2"
+              aria-label="Dismiss error"
+            >
+              ✕
+            </button>
           </div>
         )}
 
