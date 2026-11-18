@@ -8,7 +8,6 @@ test.describe("Urban Air Quality Assistant", () => {
     // Deny geolocation permission
     await context.clearPermissions();
 
-    // Mock geocoding search endpoints with deliberate delay for an older search
     await page.route("**/api/locations?q=Del*", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 600));
       await route.fulfill({
@@ -129,7 +128,6 @@ test.describe("Urban Air Quality Assistant", () => {
   test("historical smoke: opens verified historical smoke case after simulated live service failure", async ({
     page,
   }) => {
-    // Simulate live smoke service failure (e.g. 503 Service Unavailable)
     await page.route("**/api/smoke/jobs", async (route) => {
       await route.fulfill({
         status: 503,
@@ -145,14 +143,90 @@ test.describe("Urban Air Quality Assistant", () => {
 
     await page.goto("/");
 
-    // Open smoke panel or click historical smoke case button
     const historicalBtn = page.getByRole("button", { name: /historical smoke|historical case/i });
     await expect(historicalBtn).toBeVisible({ timeout: 10000 });
     await historicalBtn.click();
 
-    // Verify historical case details are rendered
     await expect(page.getByText(/Possible smoke paths/i)).toBeVisible({ timeout: 5000 });
     await expect(page.getByText(/November 3, 2024/i)).toBeVisible();
     await expect(page.getByText(/100m, 500m, 1000m/i)).toBeVisible();
+  });
+
+  test("full challenge demo flow: Delhi-NCR plan execution, Tokyo country switch, and verified facts", async ({
+    page,
+  }) => {
+    const mockForecastKolkata = {
+      lat: 28.6139,
+      lon: 77.209,
+      timeZone: "Asia/Kolkata",
+      source: "Open-Meteo",
+      current: { at: "2026-11-18T10:00:00Z", pm25: 145, usAqi: 198 },
+      hourly: [
+        { at: "2026-11-18T10:00:00Z", pm25: 145, usAqi: 198 },
+        { at: "2026-11-18T11:00:00Z", pm25: 125, usAqi: 187 },
+        { at: "2026-11-18T12:00:00Z", pm25: 95, usAqi: 172 },
+        { at: "2026-11-18T13:00:00Z", pm25: 80, usAqi: 164 },
+        { at: "2026-11-18T14:00:00Z", pm25: 75, usAqi: 161 },
+        { at: "2026-11-18T15:00:00Z", pm25: 90, usAqi: 169 },
+      ],
+    };
+
+    const mockForecastTokyo = {
+      lat: 35.6762,
+      lon: 139.6503,
+      timeZone: "Asia/Tokyo",
+      source: "Open-Meteo",
+      current: { at: "2026-11-18T10:00:00Z", pm25: 15, usAqi: 56 },
+      hourly: [
+        { at: "2026-11-18T10:00:00Z", pm25: 15, usAqi: 56 },
+        { at: "2026-11-18T11:00:00Z", pm25: 14, usAqi: 54 },
+        { at: "2026-11-18T12:00:00Z", pm25: 12, usAqi: 50 },
+      ],
+    };
+
+    // Provide reliable fixtures for Open-Meteo forecast API
+    await page.route("**/api/forecast?lat=28*&lon=77*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ forecast: mockForecastKolkata }),
+      });
+    });
+
+    await page.route("**/api/forecast?lat=35*&lon=139*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ forecast: mockForecastTokyo }),
+      });
+    });
+
+    // 1. Load root page (defaults to Delhi-NCR)
+    await page.goto("/");
+    await expect(page.getByTestId("selected-location-name")).toContainText("Delhi-NCR");
+
+    // 2. Open and submit household smog plan
+    const buildPlanBtn = page.getByRole("button", { name: /build my smog plan/i }).first();
+    await expect(buildPlanBtn).toBeVisible();
+    await buildPlanBtn.click();
+
+    // Scroll to plan panel and click submit
+    const submitBtn = page.getByRole("button", { name: /build my smog plan/i }).last();
+    await submitBtn.scrollIntoViewIfNeeded();
+    await submitBtn.click();
+
+    // Verify tailored routine is generated and rendered
+    await expect(page.getByText(/Your Tailored Smog Routine/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/Recommended Hour/i)).toBeVisible();
+    await expect(page.getByText(/Lowest Exposure/i)).toBeVisible();
+
+    // 3. Switch to Tokyo (city outside India)
+    const tokyoBtn = page.getByRole("button", { name: /tokyo demo/i });
+    await expect(tokyoBtn).toBeVisible();
+    await tokyoBtn.click();
+
+    // Verify Tokyo selection and time zone update
+    await expect(page.getByTestId("selected-location-name")).toContainText("Tokyo");
+    await expect(page.getByText(/Air Quality in Tokyo/i)).toBeVisible({ timeout: 8000 });
   });
 });
