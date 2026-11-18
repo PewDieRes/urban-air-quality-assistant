@@ -10,7 +10,6 @@ test.describe("Urban Air Quality Assistant", () => {
 
     // Mock geocoding search endpoints with deliberate delay for an older search
     await page.route("**/api/locations?q=Del*", async (route) => {
-      // Intentionally slow response for 'Del'
       await new Promise((resolve) => setTimeout(resolve, 600));
       await route.fulfill({
         status: 200,
@@ -32,7 +31,6 @@ test.describe("Urban Air Quality Assistant", () => {
     });
 
     await page.route("**/api/locations?q=Tokyo*", async (route) => {
-      // Faster response for 'Tokyo'
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -54,22 +52,17 @@ test.describe("Urban Air Quality Assistant", () => {
 
     await page.goto("/");
 
-    // Geolocation is denied, but search input should be present and usable
     const searchInput = page.getByRole("textbox", { name: /search city|search location/i });
     await expect(searchInput).toBeVisible();
 
-    // User types 'Del', then quickly changes query to 'Tokyo'
     await searchInput.fill("Del");
     await page.waitForTimeout(100);
     await searchInput.fill("Tokyo");
 
-    // The newer result 'Tokyo' should appear and not be overwritten by the delayed 'Old Stale Delhi'
     await expect(page.getByText("Tokyo, Japan")).toBeVisible({ timeout: 5000 });
-    // Wait past the stale delay
     await page.waitForTimeout(800);
     await expect(page.getByText("Old Stale Delhi")).not.toBeVisible();
 
-    // Selection remains possible
     await page.getByText("Tokyo, Japan").click();
     await expect(page.getByTestId("selected-location-name")).toContainText("Tokyo");
   });
@@ -113,28 +106,53 @@ test.describe("Urban Air Quality Assistant", () => {
 
     await page.goto("/");
 
-    // Verify accessible forecast panel is rendered
     await expect(page.getByRole("region", { name: /hourly air quality forecast/i })).toBeVisible({
       timeout: 10000,
     });
 
-    // Verify 24h scrubber slider exists
     const slider = page.getByLabel(/24-hour forecast time scrubber/i);
     await expect(slider).toBeVisible();
 
     const initialGridFetches = gridFetchCount;
 
-    // Change slider value
     await slider.fill("1");
     await page.waitForTimeout(300);
 
-    // Scrubbing should NOT trigger additional grid fetches (re-uses existing data)
     expect(gridFetchCount).toBe(initialGridFetches);
 
-    // Verify 3D toggle button is interactive
     const toggle3D = page.getByRole("button", { name: /toggle 3d|3d view/i });
     await expect(toggle3D).toBeVisible();
     await toggle3D.click();
     await expect(page.getByText(/3D Active/i)).toBeVisible();
+  });
+
+  test("historical smoke: opens verified historical smoke case after simulated live service failure", async ({
+    page,
+  }) => {
+    // Simulate live smoke service failure (e.g. 503 Service Unavailable)
+    await page.route("**/api/smoke/jobs", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "RUNNER_UNAVAILABLE",
+            message: "Live atmospheric model service is offline or unreachable.",
+          },
+        }),
+      });
+    });
+
+    await page.goto("/");
+
+    // Open smoke panel or click historical smoke case button
+    const historicalBtn = page.getByRole("button", { name: /historical smoke|historical case/i });
+    await expect(historicalBtn).toBeVisible({ timeout: 10000 });
+    await historicalBtn.click();
+
+    // Verify historical case details are rendered
+    await expect(page.getByText(/Possible smoke paths/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/November 3, 2024/i)).toBeVisible();
+    await expect(page.getByText(/100m, 500m, 1000m/i)).toBeVisible();
   });
 });

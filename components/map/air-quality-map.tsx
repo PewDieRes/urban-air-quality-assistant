@@ -1,12 +1,25 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Bounds, RegionalCell, getCellValueAtInstant } from "@/lib/map/regional-cells";
 import { Forecast, AirSample, getAqiCategory } from "@/lib/forecast/types";
 import { formatHourlyTime } from "@/lib/forecast/open-meteo";
-import { Layers, Box, Play, Pause, ChevronRight, AlertCircle, ArrowUpRight } from "lucide-react";
+import { SmokePathSet } from "@/lib/smoke/types";
+import {
+  Layers,
+  Box,
+  Play,
+  Pause,
+  ChevronRight,
+  AlertCircle,
+  ArrowUpRight,
+  Flame,
+  Wind,
+  Info,
+  X,
+} from "lucide-react";
 
 interface AirQualityMapProps {
   center: { lat: number; lon: number };
@@ -15,9 +28,6 @@ interface AirQualityMapProps {
   onSelectCoordinate?: (coords: { lat: number; lon: number }) => void;
   selectedInstant?: string | null;
   onSelectInstant?: (instant: string) => void;
-  // Optional layers for Milestone C
-  fireGeoJson?: GeoJSON.FeatureCollection | null;
-  smokeGeoJson?: GeoJSON.FeatureCollection | null;
 }
 
 export function AirQualityMap({
@@ -27,8 +37,6 @@ export function AirQualityMap({
   onSelectCoordinate,
   selectedInstant,
   onSelectInstant,
-  fireGeoJson,
-  smokeGeoJson,
 }: AirQualityMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -38,12 +46,18 @@ export function AirQualityMap({
   const [sliderIndex, setSliderIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // Layer toggles
+  const [showFires, setShowFires] = useState(true);
+  const [showHistoricalSmoke, setShowHistoricalSmoke] = useState(false);
+  const [activeSmokeData, setActiveSmokeData] = useState<SmokePathSet | null>(null);
+  const [firesGeoJson, setFiresGeoJson] = useState<GeoJSON.FeatureCollection | null>(null);
+
   // Grid cells and their pre-fetched forecasts
   const [gridData, setGridData] = useState<
     { cell: RegionalCell; forecast: Forecast }[]
   >([]);
 
-  const hourlySlots = React.useMemo(() => forecast?.hourly || [], [forecast?.hourly]);
+  const hourlySlots = useMemo(() => forecast?.hourly || [], [forecast?.hourly]);
   const activeInstant =
     selectedInstant || (hourlySlots[sliderIndex] ? hourlySlots[sliderIndex].at : null);
 
@@ -76,6 +90,84 @@ export function AirQualityMap({
     };
   }, [center.lat, center.lon]);
 
+  // Fetch recent fire detections from /api/fires
+  useEffect(() => {
+    let isCancelled = false;
+    async function loadFires() {
+      try {
+        const delta = 2.0; // broader bbox for regional fires upwind
+        const bounds: Bounds = {
+          west: center.lon - delta,
+          south: center.lat - delta,
+          east: center.lon + delta,
+          north: center.lat + delta,
+        };
+        const res = await fetch(
+          `/api/fires?west=${bounds.west}&south=${bounds.south}&east=${bounds.east}&north=${bounds.north}`
+        );
+        if (res.ok && !isCancelled) {
+          const data = await res.json();
+          const fires = data.fires || [];
+          const features: GeoJSON.Feature<GeoJSON.Point>[] = fires.map((f: any) => ({
+            type: "Feature",
+            properties: {
+              id: f.id,
+              observedAt: f.observedAt,
+              frp: f.frp,
+              source: f.source,
+            },
+            geometry: {
+              type: "Point",
+              coordinates: [f.lon, f.lat],
+            },
+          }));
+          setFiresGeoJson({ type: "FeatureCollection", features });
+        }
+      } catch (e) {
+        // Gracefully ignore fire fetch failures
+      }
+    }
+    if (showFires) {
+      loadFires();
+    } else {
+      setFiresGeoJson(null);
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [center.lat, center.lon, showFires]);
+
+  // Fetch or clear historical smoke case
+  useEffect(() => {
+    let isCancelled = false;
+    async function loadHistoricalSmoke() {
+      try {
+        const res = await fetch("/smoke/historical.geojson");
+        if (res.ok && !isCancelled) {
+          const data = await res.json();
+          const smokeSet: SmokePathSet = {
+            metadata: data.metadata,
+            paths: {
+              type: "FeatureCollection",
+              features: data.features,
+            },
+          };
+          setActiveSmokeData(smokeSet);
+        }
+      } catch (e) {
+        console.error("Failed to load historical smoke case:", e);
+      }
+    }
+    if (showHistoricalSmoke) {
+      loadHistoricalSmoke();
+    } else {
+      setActiveSmokeData(null);
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [showHistoricalSmoke]);
+
   // Initialize MapLibre GL
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -85,7 +177,7 @@ export function AirQualityMap({
         container: mapContainerRef.current,
         style: "https://tiles.openfreemap.org/styles/bright",
         center: [center.lon, center.lat],
-        zoom: 10,
+        zoom: 9,
         pitch: is3D ? 55 : 0,
         attributionControl: false,
       });
@@ -93,7 +185,6 @@ export function AirQualityMap({
       map.addControl(new maplibregl.NavigationControl(), "top-right");
 
       map.on("error", (e) => {
-        // Ignore tile 404s, catch fatal WebGL errors
         if (e.error?.message?.includes("WebGL")) {
           setMapError("WebGL context unavailable. Please use the forecast list.");
         }
@@ -124,7 +215,7 @@ export function AirQualityMap({
     if (mapRef.current) {
       mapRef.current.flyTo({
         center: [center.lon, center.lat],
-        zoom: 10,
+        zoom: 9,
         essential: true,
       });
     }
@@ -143,7 +234,7 @@ export function AirQualityMap({
     });
   }, [is3D]);
 
-  // Update GeoJSON layer for regional forecast cells when activeInstant or gridData changes
+  // Update GeoJSON layer for regional forecast cells
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -152,7 +243,6 @@ export function AirQualityMap({
     const layerId = "regional-aqi-fill";
     const borderLayerId = "regional-aqi-borders";
 
-    // Build GeoJSON features for each regional cell colored by AQI at activeInstant
     const features: GeoJSON.Feature<GeoJSON.Polygon>[] = gridData.map((item) => {
       const { cell, forecast: cellForecast } = item;
       const sample = activeInstant
@@ -162,8 +252,7 @@ export function AirQualityMap({
       const aqi = sample?.usAqi ?? null;
       const pm25 = sample?.pm25 ?? null;
 
-      // Color mapping
-      let color = "rgba(100, 116, 139, 0.25)"; // default slate
+      let color = "rgba(100, 116, 139, 0.25)";
       if (aqi !== null) {
         if (aqi <= 50) color = "rgba(16, 185, 129, 0.4)";
         else if (aqi <= 100) color = "rgba(234, 179, 8, 0.4)";
@@ -241,7 +330,7 @@ export function AirQualityMap({
     const sourceId = "fires-source";
     const layerId = "fires-layer";
 
-    if (!fireGeoJson) {
+    if (!firesGeoJson || !showFires) {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       return;
@@ -249,11 +338,11 @@ export function AirQualityMap({
 
     const source = map.getSource(sourceId) as maplibregl.GeoJSONSource;
     if (source) {
-      source.setData(fireGeoJson);
+      source.setData(firesGeoJson);
     } else {
       map.addSource(sourceId, {
         type: "geojson",
-        data: fireGeoJson,
+        data: firesGeoJson,
       });
 
       map.addLayer({
@@ -261,14 +350,33 @@ export function AirQualityMap({
         type: "circle",
         source: sourceId,
         paint: {
-          "circle-radius": 6,
-          "circle-color": "#f97316",
+          "circle-radius": 7,
+          "circle-color": "#ea580c",
           "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff",
         },
       });
+
+      map.on("click", layerId, (e) => {
+        const props = e.features?.[0]?.properties;
+        if (props) {
+          const coords = (e.features?.[0]?.geometry as any).coordinates;
+          const obsTime = props.observedAt ? new Date(props.observedAt).toLocaleString() : "Recent";
+          new maplibregl.Popup()
+            .setLngLat(coords)
+            .setHTML(
+              `<div style="font-family:sans-serif;font-size:12px;line-height:1.4">
+                <strong>NASA FIRMS Active Fire</strong><br/>
+                Observed: ${obsTime} UTC<br/>
+                Source: Satellite Detection<br/>
+                <span style="color:#94a3b8;font-size:10px">Material burned unknown</span>
+              </div>`
+            )
+            .addTo(map);
+        }
+      });
     }
-  }, [fireGeoJson]);
+  }, [firesGeoJson, showFires]);
 
   // Render Smoke Trajectory Path Lines
   useEffect(() => {
@@ -278,7 +386,7 @@ export function AirQualityMap({
     const sourceId = "smoke-source";
     const layerId = "smoke-layer";
 
-    if (!smokeGeoJson) {
+    if (!activeSmokeData || !showHistoricalSmoke) {
       if (map.getLayer(layerId)) map.removeLayer(layerId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       return;
@@ -286,11 +394,11 @@ export function AirQualityMap({
 
     const source = map.getSource(sourceId) as maplibregl.GeoJSONSource;
     if (source) {
-      source.setData(smokeGeoJson);
+      source.setData(activeSmokeData.paths);
     } else {
       map.addSource(sourceId, {
         type: "geojson",
-        data: smokeGeoJson,
+        data: activeSmokeData.paths,
       });
 
       map.addLayer({
@@ -304,11 +412,11 @@ export function AirQualityMap({
         paint: {
           "line-color": "#38bdf8",
           "line-width": 3,
-          "line-dasharray": [1.5, 1.5],
+          "line-dasharray": [2, 2],
         },
       });
     }
-  }, [smokeGeoJson]);
+  }, [activeSmokeData, showHistoricalSmoke]);
 
   // Animation player for 24h scrubber
   useEffect(() => {
@@ -334,9 +442,10 @@ export function AirQualityMap({
     }
   };
 
-  const currentDisplayTime = activeInstant && forecast?.timeZone
-    ? formatHourlyTime(activeInstant, forecast.timeZone)
-    : "Current conditions";
+  const currentDisplayTime =
+    activeInstant && forecast?.timeZone
+      ? formatHourlyTime(activeInstant, forecast.timeZone)
+      : "Current conditions";
 
   return (
     <div className="relative w-full rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl">
@@ -344,14 +453,44 @@ export function AirQualityMap({
       <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
         <div className="flex items-center gap-2 pointer-events-auto bg-slate-900/90 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-700 shadow-md">
           <span className="text-xs font-semibold text-slate-200">
-            Regional PM₂.₅ & AQI Overlay
+            Regional PM₂.₅ Overlay
           </span>
           <span className="text-[11px] font-mono text-emerald-400">
             {currentDisplayTime}
           </span>
         </div>
 
-        <div className="flex items-center gap-2 pointer-events-auto">
+        <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
+          {/* Active Fires Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowFires(!showFires)}
+            aria-label="Toggle NASA FIRMS active fire detections"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border backdrop-blur transition shadow-md ${
+              showFires
+                ? "bg-amber-600/90 text-white border-amber-500 shadow-amber-950"
+                : "bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-slate-800"
+            }`}
+          >
+            <Flame className="w-3.5 h-3.5 text-amber-300" />
+            <span>Fires</span>
+          </button>
+
+          {/* Historical Smoke Case Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowHistoricalSmoke(!showHistoricalSmoke)}
+            aria-label="Toggle historical smoke case"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border backdrop-blur transition shadow-md ${
+              showHistoricalSmoke
+                ? "bg-sky-600/90 text-white border-sky-400 shadow-sky-950"
+                : "bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-slate-800"
+            }`}
+          >
+            <Wind className="w-3.5 h-3.5 text-sky-300" />
+            <span>Historical Smoke Case</span>
+          </button>
+
           <button
             type="button"
             onClick={toggle3D}
@@ -378,6 +517,45 @@ export function AirQualityMap({
           )}
         </div>
       </div>
+
+      {/* Historical Smoke Case Metadata Drawer */}
+      {showHistoricalSmoke && activeSmokeData && (
+        <div className="absolute bottom-28 left-4 right-4 md:left-auto md:right-4 md:w-96 z-20 bg-slate-900/95 border border-sky-500/40 rounded-xl p-4 shadow-2xl backdrop-blur-md">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-2 text-sky-400 text-xs font-bold uppercase tracking-wider">
+              <Wind className="w-4 h-4" />
+              <span>Possible smoke paths</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowHistoricalSmoke(false)}
+              className="p-1 text-slate-400 hover:text-slate-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="mt-2.5 space-y-1.5 text-xs text-slate-300">
+            <div>
+              <span className="text-slate-400">Date & Case:</span>{" "}
+              <strong>November 3, 2024 (08:00 UTC)</strong>
+            </div>
+            <div>
+              <span className="text-slate-400">Model:</span> NOAA HYSPLIT (Forward Trajectory)
+            </div>
+            <div>
+              <span className="text-slate-400">Starting Heights:</span>{" "}
+              <span className="font-mono text-sky-300">100m, 500m, 1000m AGL</span>
+            </div>
+            <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-start gap-1.5 leading-relaxed">
+              <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+              <span>
+                Path estimates where air may travel. It does not establish smoke concentrations or source contribution. Citywide PM₂.₅ is displayed separately in the forecast.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Map canvas container */}
       <div
@@ -410,7 +588,9 @@ export function AirQualityMap({
 
             <div className="flex-1 flex flex-col gap-1">
               <div className="flex justify-between text-xs text-slate-400 font-mono">
-                <span>Now ({hourlySlots[0] ? formatHourlyTime(hourlySlots[0].at, forecast?.timeZone || "UTC") : ""})</span>
+                <span>
+                  Now ({hourlySlots[0] ? formatHourlyTime(hourlySlots[0].at, forecast?.timeZone || "UTC") : ""})
+                </span>
                 <span className="font-semibold text-emerald-400">{currentDisplayTime}</span>
                 <span>+24h</span>
               </div>
