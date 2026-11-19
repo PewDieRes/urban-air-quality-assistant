@@ -63,6 +63,10 @@ export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts)
   for (const item of result.data.items) {
     if (item.evidenceFactId) {
       if (!validFactIds.has(item.evidenceFactId)) {
+        console.warn(
+          `Rejecting narrative item: evidenceFactId "${item.evidenceFactId}" not in validFactIds:`,
+          Array.from(validFactIds)
+        );
         // Reject hallucinated fact ID reference
         return null;
       }
@@ -252,45 +256,58 @@ Strict requirements:
   "cautionNotes": ["..."]
 }`;
 
+  const modelsToTry = [modelName];
+  if (modelName !== "gemini-3-flash-preview") {
+    modelsToTry.push("gemini-3-flash-preview");
+  }
+
+  let candidateText: string | null = null;
+  let successfulModel: string | null = null;
+
+  for (const currentModel of modelsToTry) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${key}`;
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
+            },
+          }),
+        },
+        25000
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (candidateText) {
+          successfulModel = currentModel;
+          break;
+        }
+      } else {
+        console.warn(`Gemini API call returned status: ${res.status} for model ${currentModel}`);
+      }
+    } catch (err) {
+      console.warn(`Gemini API error for model ${currentModel}:`, err);
+    }
+  }
+
+  if (!candidateText || !successfulModel) {
+    return {
+      status: "deterministic_fallback",
+      modelUsed: null,
+      narrative: buildDeterministicNarrative(input, facts),
+      fallbackReason: "provider_error",
+    };
+  }
+
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`;
-    const res = await fetchWithTimeout(
-      url,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-          },
-        }),
-      },
-      10000
-    );
-
-    if (!res.ok) {
-      console.warn("Gemini API call returned status:", res.status);
-      return {
-        status: "deterministic_fallback",
-        modelUsed: null,
-        narrative: buildDeterministicNarrative(input, facts),
-        fallbackReason: "provider_error",
-      };
-    }
-
-    const data = await res.json();
-    const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!candidateText) {
-      return {
-        status: "deterministic_fallback",
-        modelUsed: null,
-        narrative: buildDeterministicNarrative(input, facts),
-        fallbackReason: "invalid_output",
-      };
-    }
-
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(candidateText);
@@ -315,7 +332,7 @@ Strict requirements:
 
     return {
       status: "gemini_generated",
-      modelUsed: modelName,
+      modelUsed: successfulModel,
       narrative: validated,
     };
   } catch (error) {
