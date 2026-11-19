@@ -28,6 +28,7 @@ interface AirQualityMapProps {
   onSelectCoordinate?: (coords: { lat: number; lon: number }) => void;
   selectedInstant?: string | null;
   onSelectInstant?: (instant: string) => void;
+  hideTimeline?: boolean;
 }
 
 export function AirQualityMap({
@@ -37,6 +38,7 @@ export function AirQualityMap({
   onSelectCoordinate,
   selectedInstant,
   onSelectInstant,
+  hideTimeline = false,
 }: AirQualityMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -612,71 +614,73 @@ export function AirQualityMap({
       )}
 
       {/* Bottom Controls Bar: 24-Hour Slider + Consistent Legend */}
-      <div className="p-4 bg-slate-900/95 border-t border-slate-800 flex flex-col gap-3">
-        {/* Scrubber slider */}
-        {hourlySlots.length > 0 && (
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setIsPlaying(!isPlaying)}
-              aria-label={isPlaying ? "Pause forecast animation" : "Play forecast animation"}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-            >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            </button>
+      {!hideTimeline && (
+        <div className="p-4 bg-slate-900/95 border-t border-slate-800 flex flex-col gap-3">
+          {/* Scrubber slider */}
+          {hourlySlots.length > 0 && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsPlaying(!isPlaying)}
+                aria-label={isPlaying ? "Pause forecast animation" : "Play forecast animation"}
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              </button>
 
-            <div className="flex-1 flex flex-col gap-1">
-              <div className="flex justify-between text-xs text-slate-400 font-mono">
-                <span>
-                  Now ({hourlySlots[0] ? formatHourlyTime(hourlySlots[0].at, forecast?.timeZone || "UTC") : ""})
-                </span>
-                <span className="font-semibold text-emerald-400">{currentDisplayTime}</span>
-                <span>+24h</span>
+              <div className="flex-1 flex flex-col gap-1">
+                <div className="flex justify-between text-xs text-slate-400 font-mono">
+                  <span>
+                    Now ({hourlySlots[0] ? formatHourlyTime(hourlySlots[0].at, forecast?.timeZone || "UTC") : ""})
+                  </span>
+                  <span className="font-semibold text-emerald-400">{currentDisplayTime}</span>
+                  <span>+24h</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={hourlySlots.length - 1}
+                  value={sliderIndex}
+                  onChange={handleSliderChange}
+                  aria-label="24-hour forecast time scrubber"
+                  className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
               </div>
-              <input
-                type="range"
-                min={0}
-                max={hourlySlots.length - 1}
-                value={sliderIndex}
-                onChange={handleSliderChange}
-                aria-label="24-hour forecast time scrubber"
-                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-              />
+            </div>
+          )}
+
+          {/* Consistent AQI Legend */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
+            <span className="text-slate-400 font-medium">US AQI Legend:</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
+                Good (0-50)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded bg-yellow-500 inline-block" />
+                Moderate (51-100)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded bg-orange-500 inline-block" />
+                Sensitive (101-150)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded bg-rose-500 inline-block" />
+                Unhealthy (151-200)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded bg-purple-500 inline-block" />
+                Very Unhealthy (201-300)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded bg-red-950 border border-red-500 inline-block" />
+                Hazardous (301+)
+              </span>
             </div>
           </div>
-        )}
-
-        {/* Consistent AQI Legend */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
-          <span className="text-slate-400 font-medium">US AQI Legend:</span>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
-              Good (0-50)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-3 h-3 rounded bg-yellow-500 inline-block" />
-              Moderate (51-100)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-3 h-3 rounded bg-orange-500 inline-block" />
-              Sensitive (101-150)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-3 h-3 rounded bg-rose-500 inline-block" />
-              Unhealthy (151-200)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-3 h-3 rounded bg-purple-500 inline-block" />
-              Very Unhealthy (201-300)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-3 h-3 rounded bg-red-950 border border-red-500 inline-block" />
-              Hazardous (301+)
-            </span>
-          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -34,6 +34,18 @@ const mockForecastTokyo = {
 
 test.describe("Urban Air Quality Assistant", () => {
   test.beforeEach(async ({ page }) => {
+    // Intercept fires API requests to avoid NASA FIRMS upstream network latency
+    await page.route(
+      (url) => url.pathname === "/api/fires",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ fires: [], count: 0, source: "NASA FIRMS" }),
+        });
+      }
+    );
+
     // Intercept forecast API requests using URL predicate to avoid glob '?' wildcard issues
     await page.route(
       (url) => url.pathname === "/api/forecast",

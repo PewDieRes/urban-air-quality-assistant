@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { LocationPicker } from "@/components/location/location-picker";
 import { ForecastPanel } from "@/components/forecast/forecast-panel";
-import { AirQualityMap } from "@/components/map/air-quality-map";
+import { AirQualityView } from "@/components/map/air-quality-view";
 import { PlanPanel } from "@/components/plan/plan-panel";
 import { Place, DEFAULT_PLACE, TOKYO_PLACE } from "@/lib/location/search";
 import { Forecast, AirSample } from "@/lib/forecast/types";
@@ -170,16 +170,18 @@ export default function HomePage() {
           selectedInstant={selectedInstant}
         />
 
-        {/* Interactive 2D / 3D Map */}
-        <section aria-label="Interactive air quality map">
-          <AirQualityMap
+        {/* Interactive 2D Regional Map & Immersive 3D Smog Viewer */}
+        <section aria-label="Interactive air quality map and 3D city scene">
+          <AirQualityView
             center={coordinates}
+            placeLabel={selectedPlace ? selectedPlace.name : "Selected Location"}
             forecast={forecast}
-            onOpenPlan={handleOpenPlan}
+            selectedInstant={selectedInstant}
+            onSelectInstant={(instant) => setSelectedInstant(instant)}
             onSelectCoordinate={(coords) => {
               const customPlace: Place = {
-                id: `map-${coords.lat.toFixed(4)}-${coords.lon.toFixed(4)}`,
-                name: "Map Selection",
+                id: `loc-${coords.lat.toFixed(4)}-${coords.lon.toFixed(4)}`,
+                name: "Selected Location",
                 region: `${coords.lat.toFixed(2)}°, ${coords.lon.toFixed(2)}°`,
                 country: "",
                 lat: coords.lat,
@@ -198,8 +200,7 @@ export default function HomePage() {
                 })
                 .catch(() => {});
             }}
-            selectedInstant={selectedInstant}
-            onSelectInstant={(instant) => setSelectedInstant(instant)}
+            onBuildPlan={handleOpenPlan}
           />
         </section>
 
