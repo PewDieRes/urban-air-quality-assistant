@@ -4,10 +4,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   try {
-    const { id } = params;
     if (!id) {
       return NextResponse.json(
         { error: { code: "INVALID_REQUEST", message: "Job ID is required" } },
@@ -41,7 +41,7 @@ export async function GET(
     console.error("Get smoke job error:", error);
     return NextResponse.json(
       {
-        id: params.id,
+        id,
         state: "unavailable",
         reason: "Failed to communicate with live trajectory service.",
       },

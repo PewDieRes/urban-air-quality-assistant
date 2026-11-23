@@ -6,7 +6,7 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  const rateLimitResponse = await enforceRateLimit(request, 60, 60000);
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     const fires = await listFires(bounds);
     return NextResponse.json({ fires });
   } catch (error) {
-    console.error("Fires route error:", error);
+    console.error("Fire data request failed");
     return NextResponse.json(
       { error: { code: "PROVIDER_FAILURE", message: "Failed to retrieve NASA FIRMS satellite fire detections" } },
       { status: 503 }

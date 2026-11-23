@@ -1,8 +1,9 @@
+import { NextRequest } from "next/server";
+import { GET as detect } from "@/app/api/locations/detect/route";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   searchLocations,
   formatPlaceLabel,
-  detectLocationFromIp,
   reverseGeocode,
   type Place,
 } from "@/lib/location/search";
@@ -71,29 +72,19 @@ describe("location search and disambiguation", () => {
     await expect(searchLocations("Delhi")).rejects.toThrow();
   });
 
-  it("detectLocationFromIp resolves location from IP provider response", async () => {
-    const mockIpResponse = {
-      success: true,
-      city: "Pune",
-      region: "Maharashtra",
-      country: "India",
-      latitude: 18.52,
-      longitude: 73.85,
-      timezone: { id: "Asia/Kolkata" },
-    };
-
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockIpResponse,
-    });
-
-    const place = await detectLocationFromIp("127.0.0.1");
-    expect(place).not.toBeNull();
-    expect(place?.name).toBe("Pune");
-    expect(place?.region).toBe("Maharashtra");
-    expect(place?.country).toBe("India");
-    expect(place?.lat).toBe(18.52);
-    expect(place?.lon).toBe(73.85);
+  it("uses platform coordinates without sending an IP to a provider", async () => {
+    vi.stubEnv("VERCEL", "1");
+    try {
+      const fetchSpy = vi.spyOn(global, "fetch");
+      fetchSpy.mockClear();
+      const response = await detect(new NextRequest("https://example.test/api/locations/detect", {
+        headers: { "x-vercel-ip-city": "Pune", "x-vercel-ip-latitude": "18.52", "x-vercel-ip-longitude": "73.85" },
+      }));
+      expect((await response.json()).place).toMatchObject({ name: "Pune", lat: 18.52, lon: 73.85 });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("reverseGeocode returns human-readable city from coordinates", async () => {

@@ -63,10 +63,7 @@ export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts)
   for (const item of result.data.items) {
     if (item.evidenceFactId) {
       if (!validFactIds.has(item.evidenceFactId)) {
-        console.warn(
-          `Rejecting narrative item: evidenceFactId "${item.evidenceFactId}" not in validFactIds:`,
-          Array.from(validFactIds)
-        );
+        console.warn("Gemini returned an unknown fact reference");
         // Reject hallucinated fact ID reference
         return null;
       }
@@ -131,8 +128,8 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
     items.push({
       id: "routine-default",
       category: "routine",
-      action: "Plan outdoor errands during midday hours when morning inversion dissipates",
-      whyItHelps: "Thermal inversions trap ground-level pollutants early morning and late evening.",
+      action: "Review the forecast or widen your activity window",
+      whyItHelps: "No eligible activity time was found in the current plan.",
       beneficiary: "All household members",
       impactType: "lower_exposure",
     });
@@ -177,7 +174,7 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
       id: "impact-rec",
       category: "direct_impact",
       action: `Reschedule ${facts.beforeAfterComparison.activityTitle} from ${formatHourlyTime(facts.beforeAfterComparison.baselineTime, facts.locationTimezone)} to ${formatHourlyTime(facts.beforeAfterComparison.optimizedTime, facts.locationTimezone)}`,
-      whyItHelps: `Achieves a ${facts.beforeAfterComparison.exposureReductionPercent}% reduction in peak particulate exposure by avoiding peak smog.`,
+      whyItHelps: facts.beforeAfterComparison.justification,
       beneficiary: "Household respiratory health",
       impactType: "lower_exposure",
       evidenceFactId: facts.beforeAfterComparison.activityId,
@@ -235,6 +232,7 @@ ${JSON.stringify(input, null, 2)}
 Strict requirements:
 1. You MUST include recommendations in ALL FOUR categories: "routine", "indoor", "transport", and "direct_impact".
 2. DO NOT invent times, dates, pollutant numbers, or emissions savings not present in Facts.
+A percentage change in PM₂.₅ compares regional forecast concentrations at two start times. Do not convert it into personal exposure, dose or health outcomes. Leave unscheduled activities unscheduled.
 3. Every recommendation MUST clearly state the action, why it helps, who benefits, and distinguish lowering personal exposure from lowering vehicle/community emissions.
 4. If an evidenceFactId is provided, it must match one of the activity or commitment IDs from facts: ${JSON.stringify(
     [...facts.activities.map((a) => a.id), ...facts.fixedCommitments.map((f) => f.id)]
@@ -266,12 +264,12 @@ Strict requirements:
 
   for (const currentModel of modelsToTry) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`;
       const res = await fetchWithTimeout(
         url,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
@@ -293,8 +291,8 @@ Strict requirements:
       } else {
         console.warn(`Gemini API call returned status: ${res.status} for model ${currentModel}`);
       }
-    } catch (err) {
-      console.warn(`Gemini API error for model ${currentModel}:`, err);
+    } catch {
+      console.warn(`Gemini request failed for model ${currentModel}`);
     }
   }
 

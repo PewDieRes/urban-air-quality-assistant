@@ -13,7 +13,7 @@ const SmokeJobSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  const rateLimitResponse = await enforceRateLimit(request, 60, 60000);
   if (rateLimitResponse) return rateLimitResponse;
 
   try {

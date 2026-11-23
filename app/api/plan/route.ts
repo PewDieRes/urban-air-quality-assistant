@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PlanInput } from "@/lib/plan/types";
+import { scheduleError } from "@/lib/plan/schedule";
 import { computePlanFacts } from "@/lib/plan/facts";
 import { getForecast } from "@/lib/forecast/open-meteo";
 import { generatePlan } from "@/lib/plan/gemini";
@@ -16,9 +17,9 @@ const PlanRequestSchema = z.object({
       z.object({
         id: z.string().min(1).max(100),
         title: z.string().min(1).max(200),
-        windowStart: z.string(),
-        windowEnd: z.string(),
-        durationMinutes: z.number().min(5).max(720).optional(),
+        windowStart: z.string().datetime({ offset: true }),
+        windowEnd: z.string().datetime({ offset: true }),
+        durationMinutes: z.number().min(5).max(720).default(60),
       })
     ).max(20),
     fixedCommitments: z
@@ -26,8 +27,8 @@ const PlanRequestSchema = z.object({
         z.object({
           id: z.string().min(1).max(100),
           title: z.string().min(1).max(200),
-          start: z.string(),
-          end: z.string(),
+          start: z.string().datetime({ offset: true }),
+          end: z.string().datetime({ offset: true }),
         })
       )
       .max(20)
@@ -54,7 +55,7 @@ const PlanRequestSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  const rateLimitResponse = await enforceRateLimit(request, 60, 60000);
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
@@ -87,6 +88,10 @@ export async function POST(request: NextRequest) {
     // Server-fetched forecast data ensures consistent ground truth
     const forecast = await getForecast(lat, lon);
 
+    const problem = scheduleError(input, forecast);
+    if (problem) {
+      return NextResponse.json({ error: { code: "INVALID_SCHEDULE", message: problem } }, { status: 400 });
+    }
     // Compute deterministic facts
     const facts = computePlanFacts(input as PlanInput, forecast);
 
