@@ -1,3 +1,6 @@
+import { createHmac } from "node:crypto";
+import { fetchWithTimeout } from "./fetch-with-timeout";
+import { isIP } from "node:net";
 import { NextRequest, NextResponse } from "next/server";
 
 interface RateLimitRecord {
@@ -63,31 +66,53 @@ export function rateLimit(
   };
 }
 
-/**
- * Extracts client IP from request headers (x-forwarded-for, x-real-ip) or falls back to loopback.
- */
+/** Only the deployment edge can provide a trusted visitor address. */
 export function getClientIp(request: NextRequest): string {
-  const xForwardedFor = request.headers.get("x-forwarded-for");
-  if (xForwardedFor) {
-    return xForwardedFor.split(",")[0].trim();
-  }
-  const xRealIp = request.headers.get("x-real-ip");
-  if (xRealIp) {
-    return xRealIp.trim();
-  }
-  return "127.0.0.1";
+  const edgeIp = process.env.VERCEL === "1" ? request.headers.get("x-vercel-forwarded-for")?.trim() : "";
+  return edgeIp && isIP(edgeIp) ? edgeIp : "shared";
+}
+
+// INCR and expiry must run atomically across serverless instances.
+const incrementWindow = `
+  local count = redis.call("INCR", KEYS[1])
+  if count == 1 then redis.call("PEXPIRE", KEYS[1], ARGV[1]) end
+  return {count, redis.call("PTTL", KEYS[1])}
+`;
+
+async function checkWindow(ip: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url && !token) return rateLimit(ip, limit, windowMs);
+  if (!token || !url || new URL(url).protocol !== "https:") throw new Error("Invalid rate limit configuration");
+  const visitor = createHmac("sha256", token).update(ip).digest("hex");
+  const response = await fetchWithTimeout(url, {
+    method: "POST", cache: "no-store",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(["EVAL", incrementWindow, 1, `smog:requests:${windowMs}:${visitor}`, windowMs]),
+  }, 3000);
+  if (!response.ok) throw new Error("Rate limit service unavailable");
+  const { result } = await response.json();
+  if (!Array.isArray(result) || result.length !== 2 || !result.every(Number.isSafeInteger) ||
+      result[0] < 1 || result[1] < 0) throw new Error("Invalid rate limit response");
+  return { success: result[0] <= limit, limit, remaining: Math.max(0, limit - result[0]), resetMs: result[1] };
 }
 
 /**
  * Convenience helper to verify rate limit in API route handlers and return a 429 response if exceeded.
  */
-export function enforceRateLimit(
+export async function enforceRateLimit(
   request: NextRequest,
   limit = 60,
   windowMs = 60000
-): NextResponse | null {
+): Promise<NextResponse | null> {
   const ip = getClientIp(request);
-  const result = rateLimit(ip, limit, windowMs);
+  let result: RateLimitResult;
+  try {
+    result = await checkWindow(ip, limit, windowMs);
+  } catch {
+    return NextResponse.json({ error: { code: "LIMITER_UNAVAILABLE", message: "Please retry shortly." } },
+      { status: 503, headers: { "Retry-After": "3" } });
+  }
 
   if (!result.success) {
     const retrySec = Math.ceil(result.resetMs / 1000);

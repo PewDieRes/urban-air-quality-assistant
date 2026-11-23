@@ -299,7 +299,10 @@ describe("grounded plan generation and validation", () => {
     const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
 
     expect(result.status).toBe("gemini_generated");
-    expect(result.modelUsed).toBe("gemini-3.8-flash");
+    expect(result.modelUsed).toBe(process.env.GEMINI_MODEL || "gemini-3.8-flash");
+    const [url, options] = vi.mocked(global.fetch).mock.calls[0];
+    expect(String(url)).not.toContain("key=");
+    expect(new Headers(options?.headers).get("x-goog-api-key")).toBe("test-api-key");
     expect(result.narrative.items).toHaveLength(4);
   });
 });

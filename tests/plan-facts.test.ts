@@ -82,6 +82,18 @@ describe("plan facts calculation", () => {
     expect(facts.transportComparison).toBeNull();
   });
 
+  it("leaves a second errand unscheduled if only one hour fits", () => {
+    const at = "2026-11-18T10:00:00Z";
+    const forecast: Forecast = { lat: 0, lon: 0, timeZone: "UTC", source: "Open-Meteo",
+      current: null, hourly: [{at, pm25: 40, usAqi: 95}] };
+    const activities = ["Groceries", "Walk"].map(title => ({title, id: title, windowStart: at,
+      windowEnd: "2026-11-18T11:00:00Z", durationMinutes: 60}));
+    const result = computePlanFacts({ activities }, forecast);
+    expect(result.activities[0].bestCandidate?.at).toBe(at);
+    expect(result.activities[1].bestCandidate).toBeNull();
+    expect(result.activities[1].reason).toContain("Unscheduled");
+  });
+
   it("prevents multi-activity overlaps across single schedule", () => {
     const mockForecast: Forecast = {
       lat: 28.6139,

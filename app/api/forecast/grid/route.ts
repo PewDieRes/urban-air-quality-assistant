@@ -6,7 +6,7 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  const rateLimitResponse = await enforceRateLimit(request, 60, 60000);
   if (rateLimitResponse) return rateLimitResponse;
 
   try {
@@ -31,24 +31,21 @@ export async function GET(request: NextRequest) {
     }
 
     const bounds: Bounds = {
-      west: parseFloat(westStr),
-      south: parseFloat(southStr),
-      east: parseFloat(eastStr),
-      north: parseFloat(northStr),
+      west: Number(westStr),
+      south: Number(southStr),
+      east: Number(eastStr),
+      north: Number(northStr),
     };
 
     const focal = {
-      lat: parseFloat(latStr),
-      lon: parseFloat(lonStr),
+      lat: Number(latStr),
+      lon: Number(lonStr),
     };
 
     if (
-      isNaN(bounds.west) ||
-      isNaN(bounds.south) ||
-      isNaN(bounds.east) ||
-      isNaN(bounds.north) ||
-      isNaN(focal.lat) ||
-      isNaN(focal.lon)
+      ![bounds.west, bounds.east, focal.lon].every(n => Number.isFinite(n) && Math.abs(n) <= 180) ||
+      ![bounds.north, bounds.south, focal.lat].every(n => Number.isFinite(n) && Math.abs(n) <= 90) ||
+      bounds.north < bounds.south
     ) {
       return NextResponse.json(
         { error: { code: "INVALID_COORDINATES", message: "All coordinates must be valid numbers" } },

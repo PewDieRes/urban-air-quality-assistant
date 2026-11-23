@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   PlanInput,
   PlanFacts,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/plan/types";
 import { Forecast } from "@/lib/forecast/types";
 import { computePlanFacts } from "@/lib/plan/facts";
+import { cityClock, scheduleError } from "@/lib/plan/schedule";
 import { formatHourlyTime } from "@/lib/forecast/open-meteo";
 import {
   Sparkles,
@@ -40,6 +41,9 @@ interface PlanPanelProps {
 const STORAGE_KEY = "urban_aq_plan_prefs";
 
 export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) {
+  const clock = useMemo(() => forecast ? cityClock(forecast) : null, [forecast]);
+  const initialized = useRef(false);
+  const [inputError, setInputError] = useState<string | null>(null);
   // Activity state
   const [activities, setActivities] = useState<FlexibleActivity[]>([
     {
@@ -96,11 +100,13 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
 
   // Initialize default window dates when forecast loads
   useEffect(() => {
-    if (forecast && forecast.hourly && forecast.hourly.length > 0) {
-      const firstHour = forecast.hourly[0].at;
-      const sixthHour = forecast.hourly[Math.min(6, forecast.hourly.length - 1)].at;
-      const secondHour = forecast.hourly[Math.min(2, forecast.hourly.length - 1)].at;
-      const thirdHour = forecast.hourly[Math.min(3, forecast.hourly.length - 1)].at;
+    if (clock?.range && forecast && !initialized.current) {
+      initialized.current = true;
+      const firstHour = clock.local(clock.range.start);
+      const end = (hours: number) => clock.local(Math.min(clock.range!.end, clock.range!.start + hours * 3600000));
+      const sixthHour = end(6);
+      const secondHour = clock.local(Math.min(clock.range.end - 3600000, clock.range.start + 2 * 3600000));
+      const thirdHour = end(3);
 
       setActivities((prev) =>
         prev.map((a) => ({
@@ -118,7 +124,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
         }))
       );
     }
-  }, [forecast]);
+  }, [clock, forecast]);
 
   // Load preferences from localStorage on mount
   useEffect(() => {
@@ -163,13 +169,13 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   };
 
   const handleAddActivity = () => {
-    if (!forecast || !forecast.hourly.length) return;
+    if (!forecast || !clock?.range) return;
     const newAct: FlexibleActivity = {
       id: `act-${Date.now()}`,
       title: "Outdoor walk / errand",
-      windowStart: forecast.hourly[0].at,
-      windowEnd: forecast.hourly[Math.min(10, forecast.hourly.length - 1)].at,
-      durationMinutes: 45,
+      windowStart: clock.local(clock.range.start),
+      windowEnd: clock.local(Math.min(clock.range.end, clock.range.start + 10 * 3600000)),
+      durationMinutes: 60,
     };
     setActivities([...activities, newAct]);
   };
@@ -181,12 +187,12 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   };
 
   const handleAddCommitment = () => {
-    if (!forecast || !forecast.hourly.length) return;
+    if (!forecast || !clock?.range) return;
     const newComm: FixedCommitment = {
       id: `fix-${Date.now()}`,
       title: "Work / Doctor appointment",
-      start: forecast.hourly[1].at,
-      end: forecast.hourly[2].at,
+      start: clock.local(clock.range.start),
+      end: clock.local(Math.min(clock.range.end, clock.range.start + 3600000)),
     };
     setFixedCommitments([...fixedCommitments, newComm]);
   };
@@ -197,16 +203,26 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
 
   const handleBuildPlan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!forecast) return;
-
+    if (!forecast || !clock) return;
+    let schedule: Pick<PlanInput, "activities" | "fixedCommitments">;
+    try {
+      schedule = {
+        activities: activities.map(a => ({ ...a, windowStart: clock.instant(a.windowStart), windowEnd: clock.instant(a.windowEnd) })),
+        fixedCommitments: fixedCommitments.map(f => ({ ...f, start: clock.instant(f.start), end: clock.instant(f.end) })),
+      };
+      const problem = scheduleError(schedule, forecast);
+      if (problem) throw new Error(problem);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "Check your schedule.");
+      return;
+    }
+    setInputError(null);
     savePreferences();
     setIsGenerating(true);
     setGenerationError(null);
-
     const distNum = parseFloat(distanceKm);
     const planInput: PlanInput = {
-      activities,
-      fixedCommitments,
+      ...schedule,
       transport: {
         mode: transportMode,
         distanceKm: !isNaN(distNum) && distNum > 0 ? distNum : undefined,
@@ -289,6 +305,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
         </div>
       </div>
 
+      {inputError && <p role="alert" className="mt-3 text-rose-300">{inputError}</p>}
       <form onSubmit={handleBuildPlan} className="mt-6 space-y-6">
         {/* Step 1: Flexible Activities */}
         <div className="space-y-3">
@@ -361,6 +378,9 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                   </select>
                 </div>
 
+                <TimeWindow label="Activity" start={activity.windowStart} end={activity.windowEnd} zone={timeZone}
+                  onChange={(start, end) => setActivities(rows => rows.map(a => a.id === activity.id ? { ...a, windowStart: start, windowEnd: end } : a))}
+                />
                 {activities.length > 1 && (
                   <button
                     type="button"
@@ -420,9 +440,9 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                     placeholder="e.g. School pickup, Work shift"
                   />
                 </div>
-                <span className="text-xs text-slate-400 font-mono">
-                  Preserved in plan ({timeZone})
-                </span>
+                <TimeWindow label="Commitment" start={commitment.start} end={commitment.end} zone={timeZone}
+                  onChange={(start, end) => setFixedCommitments(rows => rows.map(f => f.id === commitment.id ? { ...f, start, end } : f))}
+                />
                 <button
                   type="button"
                   onClick={() => handleRemoveCommitment(commitment.id)}
@@ -601,7 +621,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
               {planStatus === "gemini_generated" ? (
                 <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                   <Sparkles className="w-3.5 h-3.5" />
-                  Generated by Gemini ({modelUsed || "gemini-3.8-flash"})
+                  Generated by Gemini {modelUsed && `(${modelUsed})`}
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30">
@@ -656,9 +676,9 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                 </div>
 
                 <div className="bg-slate-950/80 rounded-lg p-3 border border-slate-800 flex flex-col justify-center">
-                  <span className="text-[11px] text-slate-400 block">Exposure Reduction</span>
+                  <span className="text-[11px] text-slate-400 block">Lower forecast PM₂.₅ concentration</span>
                   <div className="text-xl font-extrabold text-emerald-400 mt-0.5">
-                    -{factsResult.beforeAfterComparison.exposureReductionPercent}%
+                    {factsResult.beforeAfterComparison.exposureReductionPercent}%
                   </div>
                   <span className="text-[10px] text-slate-400">lower forecast PM₂.₅</span>
                 </div>
@@ -840,4 +860,21 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       )}
     </section>
   );
+}
+
+
+function TimeWindow({ label, start, end, zone, onChange }: {
+  label: string; start: string; end: string; zone: string;
+  onChange: (start: string, end: string) => void;
+}) {
+  return <fieldset className="flex flex-wrap gap-3 text-xs text-slate-300">
+    <legend>{label} times · {zone}</legend>
+    {(["start", "end"] as const).map(edge => (
+      <label key={edge}>{label} {edge}
+        <input type="datetime-local" required value={edge === "start" ? start : end}
+          className="block rounded bg-slate-900 p-2 text-slate-100"
+          onChange={event => edge === "start" ? onChange(event.target.value, end) : onChange(start, event.target.value)} />
+      </label>
+    ))}
+  </fieldset>;
 }

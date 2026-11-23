@@ -4,11 +4,13 @@
 - **Framework:** Next.js 14 App Router
 - **Target Platform:** Vercel Hobby tier
 - **Environment Variables:**
-  - `GEMINI_API_KEY`: Google Gemini API key for structured planning narratives and smoke explanations.
+  - `GEMINI_API_KEY`: Google Gemini API key for structured household planning narratives.
   - `GEMINI_MODEL`: Model identifier (defaults to `gemini-3.8-flash`).
   - `FIRMS_MAP_KEY`: NASA FIRMS Map Key for real-time VIIRS/MODIS fire detections.
   - `SMOKE_SERVICE_URL` (optional): URL of verified external HYSPLIT container service.
   - `SMOKE_SERVICE_TOKEN` (optional): Bearer credential for the runner.
+
+On Vercel, the optional approximate-location fallback uses edge geolocation headers after a user requests their location. Other hosts can use browser geolocation and city search. The default request limiter applies to each process. To share a rate limit across instances, set the server-only UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN. A configured but unavailable limiter returns HTTP 503.
 
 ## 2. HYSPLIT Atmospheric Modeling Verification
 ### Licensing and Distribution
@@ -24,9 +26,9 @@
   - **System Behavior:** When an external live runner is not configured or lacks local ARL weather grids, the app gracefully returns status `unavailable` and guides the user to the verified historical case (`public/smoke/historical.geojson`), preventing failed user experiences while maintaining full scientific traceability.
 
 ## 3. Production Verification Checklist
-- [x] TypeScript typechecking zero errors (`npm run typecheck`)
-- [x] ESLint rules pass with zero warnings (`npm run lint`)
-- [x] All unit test suites pass (`npm test`)
-- [x] Playwright browser end-to-end tests pass (`npm run test:e2e`)
-- [x] Next.js production build completes (`npm run build`)
-- [x] Python HYSPLIT adapter tests pass (`cd services/smoke && python -B -m pytest tests -q`)
+- [ ] TypeScript typechecking zero errors (`npm run typecheck`)
+- [ ] ESLint rules pass with zero warnings (`npm run lint`)
+- [ ] All unit test suites pass (`npm test`)
+- [ ] Playwright browser end-to-end tests pass (`npm run test:e2e`)
+- [ ] Next.js production build completes (`npm run build`)
+- [ ] Python HYSPLIT adapter tests pass (`cd services/smoke && python -B -m pytest tests -q`)

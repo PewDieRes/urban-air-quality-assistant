@@ -5,7 +5,7 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const rateLimitResponse = enforceRateLimit(request, 60, 60000);
+  const rateLimitResponse = await enforceRateLimit(request, 60, 60000);
   if (rateLimitResponse) return rateLimitResponse;
 
   const { searchParams } = new URL(request.url);

@@ -1,3 +1,4 @@
+import { formatHourlyTime } from "../forecast/open-meteo";
 import { Forecast, AirSample } from "../forecast/types";
 import {
   PlanInput,
@@ -54,7 +55,8 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
         return intervalsOverlap(sampleStartMs, sampleEndMs, commStartMs, commEndMs);
       });
 
-      if (!hasConflict) {
+      const alreadyUsed = scheduledIntervals.some(slot => intervalsOverlap(sampleStartMs, sampleEndMs, slot.start, slot.end));
+      if (!hasConflict && !alreadyUsed) {
         validCandidates.push(sample);
       }
     }
@@ -66,7 +68,7 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
         durationMinutes,
         eligibleCandidates: [],
         bestCandidate: null,
-        reason: "No eligible hours without schedule conflicts or missing data found in the selected window.",
+        reason: "Unscheduled. No hour with forecast data fits the full activity around your other commitments and errands.",
       };
     }
 
@@ -77,22 +79,12 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
       return new Date(a.at).getTime() - new Date(b.at).getTime();
     });
 
-    // Select the candidate with lower forecast PM₂.₅ that does not overlap with previously scheduled activities
-    let chosenCandidate = sorted.find((cand) => {
-      const startMs = new Date(cand.at).getTime();
-      const endMs = startMs + durationMs;
-      return !scheduledIntervals.some((slot) => intervalsOverlap(startMs, endMs, slot.start, slot.end));
-    });
+    const chosenCandidate = sorted[0];
+    const start = Date.parse(chosenCandidate.at);
+    scheduledIntervals.push({ start, end: start + durationMs });
+    const localTime = formatHourlyTime(chosenCandidate.at, forecast.timeZone);
 
-    // Fall back to best independent candidate if no non-overlapping slot exists
-    if (!chosenCandidate) {
-      chosenCandidate = sorted[0];
-    } else {
-      const startMs = new Date(chosenCandidate.at).getTime();
-      scheduledIntervals.push({ start: startMs, end: startMs + durationMs });
-    }
-
-    const reason = `Optimal slot at ${chosenCandidate.at} with lower forecast PM₂.₅ (${chosenCandidate.pm25?.toFixed(
+    const reason = `Available slot at ${localTime} with lower forecast PM₂.₅ (${chosenCandidate.pm25?.toFixed(
       0
     )} µg/m³, US AQI: ${chosenCandidate.usAqi ?? "—"}), fitting entirely within the allowed window and avoiding fixed commitments.`;
 
@@ -114,10 +106,10 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
     const baseline = primaryActivity.eligibleCandidates[0];
     const best = primaryActivity.bestCandidate;
 
-    if (baseline.at !== best.at && baseline.pm25 !== null && best.pm25 !== null) {
+    if (baseline.at !== best.at && baseline.pm25 !== null && baseline.pm25 > 0 && best.pm25 !== null) {
       const reduction = Math.max(
         0,
-        Math.round(((baseline.pm25 - best.pm25) / Math.max(baseline.pm25, 1)) * 100)
+        Math.round(((baseline.pm25 - best.pm25) / baseline.pm25) * 100)
       );
       beforeAfterComparison = {
         activityId: primaryActivity.id,
@@ -127,7 +119,7 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
         optimizedTime: best.at,
         optimizedPm25: best.pm25,
         exposureReductionPercent: reduction,
-        justification: `Rescheduling ${primaryActivity.title} from ${baseline.at} (${baseline.pm25} µg/m³) to ${best.at} (${best.pm25} µg/m³) shifts the routine to an hour with lower forecast PM₂.₅, achieving a ${reduction}% reduction in peak particulate exposure without altering emissions.`,
+        justification: `At ${formatHourlyTime(best.at, forecast.timeZone)}, forecast PM₂.₅ concentration is ${reduction}% lower than at ${formatHourlyTime(baseline.at, forecast.timeZone)} (${best.pm25} versus ${baseline.pm25} µg/m³).`,
       };
     }
   }
@@ -152,11 +144,11 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
         distanceKm: km,
         estimatedCo2KgSaved: 0,
         units: "kg CO₂e",
-        factorSource: "Vehicle cabin air filtration studies (EPA / ASHRAE)",
-        assumptions: "Cabin recirculation filters in-cabin air and blocks outdoor smog infiltration. The vehicle powertrain energy consumption and grid emissions remain identical.",
-        isEstimate: false,
+        factorSource: "Scenario assumption: same vehicle, trip and distance",
+        assumptions: "The comparison credits no emissions savings for changing the cabin setting.",
+        isEstimate: true,
         impactType: "lower_exposure",
-        explanation: `For an EV driving ${km} km, engaging HVAC cabin recirculation cuts in-cabin particulate exposure by up to 80% while producing exactly 0.00 kg CO₂e emissions change.`,
+        explanation: `For an EV driving ${km} km, recirculation can reduce the entry of outdoor particles. Its effect depends on the filter and cabin. No emissions savings are credited for the cabin setting.`,
       };
     } else if (mode === "car") {
       const carCo2 = km * 0.17; // DEFRA average passenger car ~0.170 kg/km
@@ -174,10 +166,10 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
         factorSource: "Regional DEFRA/IPCC passenger transport conversion factors (2024)",
         assumptions: `Combustion car ~0.170 kg CO₂e/km; public rail/bus ~0.040 kg CO₂e/km over a ${km} km journey.`,
         isEstimate: true,
-        impactType: "both",
+        impactType: "lower_emissions",
         explanation: `Switching a ${km} km commute from private car to ${targetMode} saves approximately ${saved.toFixed(
           2
-        )} kg CO₂e in tailpipe emissions and reduces personal roadway exposure during peak traffic.`,
+        )} kg CO₂e under these travel assumptions.`,
       };
     } else if (mode === "transit") {
       transportComparison = {

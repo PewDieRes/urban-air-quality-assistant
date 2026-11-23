@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { LocationPicker } from "@/components/location/location-picker";
 import { ForecastPanel } from "@/components/forecast/forecast-panel";
 import { AirQualityView } from "@/components/map/air-quality-view";
 import { PlanPanel } from "@/components/plan/plan-panel";
 import { Place, DEFAULT_PLACE, TOKYO_PLACE } from "@/lib/location/search";
 import { Forecast, AirSample } from "@/lib/forecast/types";
-import { Wind, Shield, Globe2, Sparkles, Flame, Navigation2, MapPin } from "lucide-react";
+import { Wind, Shield, Globe2, Sparkles, Flame, Navigation2 } from "lucide-react";
 
 export default function HomePage() {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(DEFAULT_PLACE);
@@ -18,40 +18,20 @@ export default function HomePage() {
 
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [selectedInstant, setSelectedInstant] = useState<string | null>(null);
-  const [detectedPlace, setDetectedPlace] = useState<Place | null>(null);
 
   const planRef = useRef<HTMLDivElement>(null);
 
-  // Background auto-detect user's location to provide instant "My Location" option
   useEffect(() => {
-    fetch("/api/locations/detect")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.place) {
-          setDetectedPlace(data.place);
-        }
-      })
+    const controller = new AbortController();
+    fetch(`/api/forecast?lat=${coordinates.lat}&lon=${coordinates.lon}`, { signal: controller.signal })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (!controller.signal.aborted) setForecast(data?.forecast ?? null); })
       .catch(() => {});
-  }, []);
-
-  // Fetch forecast whenever coordinates change
-  const refreshForecast = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/forecast?lat=${coordinates.lat}&lon=${coordinates.lon}`);
-      if (res.ok) {
-        const data = await res.json();
-        setForecast(data.forecast);
-      }
-    } catch (err) {
-      // ForecastPanel handles its own retry state
-    }
+    return () => controller.abort();
   }, [coordinates.lat, coordinates.lon]);
 
-  useEffect(() => {
-    refreshForecast();
-  }, [refreshForecast]);
-
   const handleSelectLocation = (place: Place | null, coords: { lat: number; lon: number }) => {
+    if (coords.lat !== coordinates.lat || coords.lon !== coordinates.lon) setForecast(null);
     setSelectedPlace(place);
     setCoordinates(coords);
     setSelectedInstant(null);
@@ -122,29 +102,6 @@ export default function HomePage() {
               >
                 Tokyo Demo
               </button>
-              {detectedPlace &&
-                detectedPlace.name !== DEFAULT_PLACE.name &&
-                detectedPlace.name !== TOKYO_PLACE.name && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSelectLocation(detectedPlace, {
-                        lat: detectedPlace.lat,
-                        lon: detectedPlace.lon,
-                      })
-                    }
-                    className={`px-2.5 py-1 rounded-lg font-medium transition flex items-center gap-1 ${
-                      selectedPlace?.id === detectedPlace.id ||
-                      selectedPlace?.name === detectedPlace.name
-                        ? "bg-emerald-600 text-white shadow"
-                        : "text-sky-400 hover:text-sky-200"
-                    }`}
-                    title={`Switch to detected location: ${detectedPlace.name}`}
-                  >
-                    <MapPin className="w-3 h-3 text-sky-400" />
-                    <span>{detectedPlace.name} (My Location)</span>
-                  </button>
-                )}
             </div>
 
             <div className="flex-1 min-w-[260px]">
@@ -207,6 +164,7 @@ export default function HomePage() {
         {/* Household Planner Anchor & Panel */}
         <div ref={planRef} id="household-plan-section">
           <PlanPanel
+            key={`${coordinates.lat},${coordinates.lon}`}
             forecast={forecast}
             locationName={selectedPlace ? selectedPlace.name : "Selected Location"}
             lat={coordinates.lat}

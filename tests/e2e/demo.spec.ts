@@ -227,34 +227,37 @@ test.describe("Urban Air Quality Assistant", () => {
   test("full challenge demo flow: Delhi-NCR plan execution, Tokyo country switch, and verified facts", async ({
     page,
   }) => {
-    // 1. Load root page (defaults to Delhi-NCR)
+    let autoDetections = 0;
+    page.on("request", req => { if (new URL(req.url()).pathname === "/api/locations/detect") autoDetections++; });
+    // Use identical local hours but different UTC offsets, independent of the browser timezone.
+    await page.route(url => url.pathname === "/api/forecast", async route => {
+      const tokyo = Number(new URL(route.request().url()).searchParams.get("lat")) > 34;
+      const base = tokyo ? mockForecastTokyo : mockForecastKolkata;
+      const first = Date.parse(tokyo ? "2026-11-18T05:00Z" : "2026-11-18T08:30Z");
+      const hourly = [85, 75, 70, 65, 35, 60, 80].map((pm25, i) => ({
+        at: new Date(first + i * 3600000).toISOString(), pm25, usAqi: 100,
+      }));
+      await route.fulfill({ json: { forecast: { ...base, current: hourly[0], hourly } } });
+    });
+    // The local calculation is real. Isolate upstream Gemini and exercise the labeled fallback.
+    await page.route(url => url.pathname === "/api/plan", route => route.fulfill({
+      json: {status: "deterministic_fallback", modelUsed: null},
+    }));
     await page.goto("/");
-    await expect(page.getByTestId("selected-location-name")).toContainText("Delhi-NCR");
-
-    // 2. Open and submit household smog plan
-    const buildPlanBtn = page.getByRole("button", { name: /build my smog plan/i }).first();
-    await expect(buildPlanBtn).toBeVisible();
-    await buildPlanBtn.click();
-
-    // Scroll to plan panel and click submit
-    const submitBtn = page.getByRole("button", { name: /build My smog plan/i }).last();
-    await submitBtn.scrollIntoViewIfNeeded();
-    await submitBtn.click();
-
-    // Verify tailored routine is generated and rendered
-    await expect(
-      page.getByText(/Demonstrable Before-and-After Schedule Optimization|Your Tailored Smog Routine/i)
-    ).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/Recommended Hour/i)).toBeVisible();
-    await expect(page.getByText(/lower forecast PM₂.₅|Lowest Exposure/i).first()).toBeVisible();
-
-    // 3. Switch to Tokyo (city outside India)
-    const tokyoBtn = page.getByRole("button", { name: /tokyo demo/i });
-    await expect(tokyoBtn).toBeVisible();
-    await tokyoBtn.click();
-
-    // Verify Tokyo selection and time zone update
-    await expect(page.getByTestId("selected-location-name")).toContainText("Tokyo");
-    await expect(page.getByText(/Air Quality in Tokyo/i)).toBeVisible({ timeout: 8000 });
+    for (const [city, utc] of [["Delhi-NCR", "09:30"], ["Tokyo", "06:00"]]) {
+      if (city === "Tokyo") await page.getByRole("button", {name: "Tokyo Demo"}).click();
+      const planner = page.locator("#household-plan-section");
+      await expect(planner.getByLabel("Activity start", {exact: true})).toHaveValue("2026-11-18T14:00");
+      for (const [label, time] of [["Activity start", "16:00"], ["Activity end", "20:00"],
+        ["Commitment start", "15:00"], ["Commitment end", "15:30"]]) {
+        await planner.getByLabel(label, {exact: true}).fill("2026-11-18T" + time);
+      }
+      const request = page.waitForRequest(req => new URL(req.url()).pathname === "/api/plan");
+      await planner.getByRole("button", {name: "Build My Smog Plan", exact: true}).click();
+      expect((await request).postDataJSON().input.fixedCommitments[0].start).toBe(`2026-11-18T${utc}:00.000Z`);
+      await expect(planner.getByText("6:00 PM", {exact: true}).first()).toBeVisible();
+      await expect(planner.getByText("3:00 PM - 3:30 PM")).toBeVisible();
+    }
+    expect(autoDetections).toBe(0);
   });
 });
