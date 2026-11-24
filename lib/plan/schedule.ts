@@ -1,5 +1,6 @@
 import type { Forecast } from "../forecast/types";
 import type { PlanInput } from "./types";
+import { formatHourlyTimeWithDate } from "../forecast/open-meteo";
 
 export function forecastRange(forecast: Forecast) {
   const hours = forecast.hourly;
@@ -15,7 +16,11 @@ export function scheduleError(input: Pick<PlanInput, "activities" | "fixedCommit
   for (const [title, start, end] of windows) {
     const a = Date.parse(start), b = Date.parse(end);
     if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return `${title}: choose an end after the start.`;
-    if (a < range.start || b > range.end) return `${title}: choose times inside the displayed forecast.`;
+    if (a < range.start || b > range.end) {
+      const startStr = formatHourlyTimeWithDate(new Date(range.start).toISOString(), forecast.timeZone).full;
+      const endStr = formatHourlyTimeWithDate(new Date(range.end).toISOString(), forecast.timeZone).full;
+      return `${title}: choose times inside the displayed forecast (${startStr} to ${endStr}).`;
+    }
   }
   return null;
 }

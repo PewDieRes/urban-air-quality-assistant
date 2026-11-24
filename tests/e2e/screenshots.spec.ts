@@ -1,7 +1,44 @@
 import { test, expect } from "@playwright/test";
 import path from "path";
+import fs from "fs";
 
 const ARTIFACT_DIR = "C:/Users/vazem/.gemini/antigravity-cli/brain/666b0fd3-02b5-4222-9992-9838ffe390f5/screenshots";
+const PARENT_ARTIFACT_DIR = "C:/Users/vazem/.gemini/antigravity-cli/brain/666b0fd3-02b5-4222-9992-9838ffe390f5";
+
+async function labelSampleData(page: any) {
+  await page.evaluate(() => {
+    if (document.getElementById("sample-data-watermark")) return;
+    const b = document.createElement("div");
+    b.id = "sample-data-watermark";
+    b.textContent = "Sample Data / Mocked Forecast";
+    b.style.position = "fixed";
+    b.style.bottom = "8px";
+    b.style.right = "8px";
+    b.style.backgroundColor = "rgba(28, 25, 23, 0.88)";
+    b.style.color = "#ffffff";
+    b.style.fontSize = "10px";
+    b.style.fontWeight = "600";
+    b.style.letterSpacing = "0.025em";
+    b.style.padding = "3px 8px";
+    b.style.borderRadius = "4px";
+    b.style.zIndex = "99999";
+    b.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
+    b.style.pointerEvents = "none";
+    document.body.appendChild(b);
+  });
+}
+
+function syncScreenshot(fileName: string) {
+  try {
+    const src = path.join(ARTIFACT_DIR, fileName);
+    const dest = path.join(PARENT_ARTIFACT_DIR, fileName);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+    }
+  } catch {
+    // Ignore sync errors
+  }
+}
 
 const mockForecastDelhi = {
   lat: 28.6139,
@@ -108,12 +145,14 @@ test.describe("Redesign Screenshots Verification", () => {
     await expect(page.getByRole("region", { name: /hourly air quality forecast/i })).toBeVisible({
       timeout: 10000,
     });
+    await labelSampleData(page);
 
     // 1. Initial Screen
     await page.screenshot({
       path: path.join(ARTIFACT_DIR, "desktop-initial.png"),
       fullPage: false,
     });
+    syncScreenshot("desktop-initial.png");
 
     // Set pickup: 15:00 - 15:30
     await page.getByLabel("Commitment start", { exact: true }).fill("2026-11-18T15:00");
@@ -128,24 +167,30 @@ test.describe("Redesign Screenshots Verification", () => {
     await findTimeBtn.click();
 
     const planner = page.locator("#household-plan-section");
-    await expect(planner.getByText("6:00 PM").first()).toBeVisible({ timeout: 5000 });
+    const resultHeading = planner.getByRole("heading", { name: /buy groceries at 6 pm|grocery shopping at 6/i });
+    await expect(resultHeading).toBeVisible({ timeout: 5000 });
     await expect(planner.getByText("3:00 PM - 3:30 PM")).toBeVisible();
+
+    await labelSampleData(page);
 
     // Generated Result Screen
     await page.screenshot({
       path: path.join(ARTIFACT_DIR, "desktop-generated.png"),
       fullPage: false,
     });
+    syncScreenshot("desktop-generated.png");
 
     // 3. Map View
     const mapSection = page.locator("#explore-map-section");
     await mapSection.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
+    await labelSampleData(page);
 
     await page.screenshot({
       path: path.join(ARTIFACT_DIR, "desktop-map.png"),
       fullPage: false,
     });
+    syncScreenshot("desktop-map.png");
   });
 
   test("captures mobile screenshots at 390x844", async ({ page }) => {
@@ -155,12 +200,14 @@ test.describe("Redesign Screenshots Verification", () => {
     await expect(page.getByRole("region", { name: /hourly air quality forecast/i })).toBeVisible({
       timeout: 10000,
     });
+    await labelSampleData(page);
 
     // 1. Mobile Initial Screen
     await page.screenshot({
       path: path.join(ARTIFACT_DIR, "mobile-initial.png"),
       fullPage: false,
     });
+    syncScreenshot("mobile-initial.png");
 
     // Set pickup & grocery
     await page.getByLabel("Commitment start", { exact: true }).fill("2026-11-18T15:00");
@@ -173,22 +220,36 @@ test.describe("Redesign Screenshots Verification", () => {
     await findTimeBtn.click();
 
     const planner = page.locator("#household-plan-section");
-    await expect(planner.getByText("6:00 PM").first()).toBeVisible({ timeout: 5000 });
+    const resultHeading = planner.getByRole("heading", { name: /buy groceries at 6 pm|grocery shopping at 6/i });
+    await expect(resultHeading).toBeVisible({ timeout: 5000 });
+
+    // Scroll result heading into view so recommendation, pickup, and reason are visible together in 390x844
+    await resultHeading.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+
+    await expect(planner.getByText(/school pickup stays at 3 pm/i)).toBeVisible();
+    await expect(planner.getByText("3:00 PM - 3:30 PM")).toBeVisible();
+    await expect(planner.getByText("Explained by Gemini")).toBeVisible();
+
+    await labelSampleData(page);
 
     // 2. Mobile Generated Result Screen
     await page.screenshot({
       path: path.join(ARTIFACT_DIR, "mobile-generated.png"),
       fullPage: false,
     });
+    syncScreenshot("mobile-generated.png");
 
     // 3. Mobile Map View
     const mapSection = page.locator("#explore-map-section");
     await mapSection.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
+    await labelSampleData(page);
 
     await page.screenshot({
       path: path.join(ARTIFACT_DIR, "mobile-map.png"),
       fullPage: false,
     });
+    syncScreenshot("mobile-map.png");
   });
 });

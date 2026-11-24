@@ -12,7 +12,7 @@ import {
 import { Forecast } from "@/lib/forecast/types";
 import { computePlanFacts } from "@/lib/plan/facts";
 import { cityClock, scheduleError, forecastRange } from "@/lib/plan/schedule";
-import { formatHourlyTime } from "@/lib/forecast/open-meteo";
+import { formatHourlyTime, formatHourlyTimeWithDate } from "@/lib/forecast/open-meteo";
 import {
   Calendar,
   Clock,
@@ -28,6 +28,7 @@ import {
   RefreshCw,
   Sparkles,
   ChevronDown,
+  Edit3,
 } from "lucide-react";
 
 interface PlanPanelProps {
@@ -44,6 +45,12 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   const range = useMemo(() => (forecast ? forecastRange(forecast) : null), [forecast]);
   const initialized = useRef(false);
   const [inputError, setInputError] = useState<string | null>(null);
+
+  const resultHeadingRef = useRef<HTMLHeadingElement>(null);
+  const resultContainerRef = useRef<HTMLDivElement>(null);
+  const errorAlertRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
 
   // Activity state
   const [activities, setActivities] = useState<FlexibleActivity[]>([
@@ -226,7 +233,12 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       const problem = scheduleError(schedule, forecast);
       if (problem) throw new Error(problem);
     } catch (error) {
-      setInputError(error instanceof Error ? error.message : "Check your schedule.");
+      const msg = error instanceof Error ? error.message : "Check your schedule.";
+      setInputError(msg);
+      setTimeout(() => {
+        errorAlertRef.current?.focus();
+        errorAlertRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
       return;
     }
 
@@ -287,15 +299,38 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       setModelUsed(null);
     } finally {
       setIsGenerating(false);
+      setTimeout(() => {
+        resultHeadingRef.current?.focus();
+        resultHeadingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
     }
   };
 
   const timeZone = forecast?.timeZone || "UTC";
 
-  // Available range label for inputs outside forecast
-  const availableRangeText = range
-    ? `${formatHourlyTime(new Date(range.start).toISOString(), timeZone)} to ${formatHourlyTime(new Date(range.end).toISOString(), timeZone)}`
-    : "";
+  const handleScrollToForm = () => {
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    firstInputRef.current?.focus();
+  };
+
+  // Available range label for inputs outside forecast with dates and times
+  const availableRangeText = useMemo(() => {
+    if (!range) return "";
+    const startFull = formatHourlyTimeWithDate(new Date(range.start).toISOString(), timeZone).full;
+    const endFull = formatHourlyTimeWithDate(new Date(range.end).toISOString(), timeZone).full;
+    return `${startFull} to ${endFull}`;
+  }, [range, timeZone]);
+
+  // Default transport advice respecting availableModes
+  const defaultTransportAdvice = useMemo(() => {
+    if (availableModes.includes("transit")) {
+      return "Choose shared public transit or electric rail when commuting to minimize vehicle emissions.";
+    }
+    if (availableModes.includes("walk") || availableModes.includes("bike")) {
+      return "Combine outdoor errands or consider active travel with an N95 mask for shorter neighborhood trips.";
+    }
+    return "Consolidate daily driving into a single trip or carpool to reduce vehicle cold-start emissions.";
+  }, [availableModes]);
 
   // Derive decision headline & explanation from verified facts
   const decisionOutput = useMemo(() => {
@@ -314,52 +349,82 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       return {
         headline: `No eligible slot for ${primaryAct.title}`,
         explanation: firstCommitment
-          ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone)}. No available hour in your requested window fits your activity around it. Try widening your time window.`
+          ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone).replace(":00 ", " ")}. No available hour in your requested window fits your activity around it. Try widening your time window.`
           : `No available hour in your requested window fits your activity duration. Try widening your time window.`,
       };
     }
 
     const bestTime = formatHourlyTime(primaryAct.bestCandidate.at, timeZone);
+    const cleanBestTime = bestTime.replace(":00 ", " ");
     const bestPm = primaryAct.bestCandidate.pm25 !== null ? Math.round(primaryAct.bestCandidate.pm25) : null;
+    const pickupTime = firstCommitment ? formatHourlyTime(firstCommitment.start, timeZone).replace(":00 ", " ") : "";
     const pickupStay = firstCommitment
-      ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone)}. `
+      ? `${firstCommitment.title} stays at ${pickupTime}. `
       : "";
+    const isGrocery = /grocer/i.test(primaryAct.title);
+    const actLabel = isGrocery ? "grocery trip" : primaryAct.title.toLowerCase();
+    const durationLabel = primaryAct.durationMinutes === 60 ? "one-hour" : `${primaryAct.durationMinutes}-minute`;
 
     // Earliest eligible hour was already best
     if (primaryAct.isEarliestAlreadyBest) {
+      const headline = isGrocery
+        ? `Keep your original time: Buy groceries at ${cleanBestTime}`
+        : `Keep your original time: ${cleanBestTime}`;
       return {
-        headline: `Keep your original time: ${bestTime}`,
-        explanation: `${pickupStay}For your ${primaryAct.title.toLowerCase()}, the earliest slot at ${bestTime} already offers the lowest forecast pollution (${bestPm} µg/m³).`,
+        headline,
+        explanation: `${pickupStay}For your ${durationLabel} ${actLabel}, the earliest slot at ${cleanBestTime} already offers the lowest forecast pollution (${bestPm} µg/m³).`,
       };
     }
 
     // Two hours tied
     if (primaryAct.tiedCandidates && primaryAct.tiedCandidates.length > 0) {
-      const tiedTime = formatHourlyTime(primaryAct.tiedCandidates[0].at, timeZone);
+      const tiedTime = formatHourlyTime(primaryAct.tiedCandidates[0].at, timeZone).replace(":00 ", " ");
+      const headline = isGrocery
+        ? `Buy groceries at ${cleanBestTime}`
+        : `${primaryAct.title} at ${cleanBestTime}`;
       return {
-        headline: `${primaryAct.title} at ${bestTime}`,
-        explanation: `${pickupStay}Both ${bestTime} and ${tiedTime} have the same lowest forecast PM₂.₅ (${bestPm} µg/m³).`,
+        headline,
+        explanation: `${pickupStay}Both ${cleanBestTime} and ${tiedTime} have the same lowest forecast PM₂.₅ (${bestPm} µg/m³).`,
       };
     }
 
     // Rescheduled to lower-pollution hour
     if (factsResult.beforeAfterComparison) {
-      const baselineTime = formatHourlyTime(factsResult.beforeAfterComparison.baselineTime, timeZone);
+      const baselineTime = formatHourlyTime(factsResult.beforeAfterComparison.baselineTime, timeZone).replace(":00 ", " ");
       const baselinePm = factsResult.beforeAfterComparison.baselinePm25 !== null
         ? Math.round(factsResult.beforeAfterComparison.baselinePm25)
         : null;
       const reduction = factsResult.beforeAfterComparison.exposureReductionPercent;
+      const headline = isGrocery
+        ? `Buy groceries at ${cleanBestTime}`
+        : `${primaryAct.title} at ${cleanBestTime}`;
       return {
-        headline: `${primaryAct.title} at ${bestTime}`,
-        explanation: `${pickupStay}For your ${primaryAct.durationMinutes ? primaryAct.durationMinutes + "-minute" : ""} ${primaryAct.title.toLowerCase()}, the forecast is ${bestPm} µg/m³ at ${bestTime}, compared with ${baselinePm} µg/m³ at ${baselineTime} (${reduction}% lower forecast PM₂.₅).`,
+        headline,
+        explanation: `${pickupStay}For your ${durationLabel} ${actLabel}, the forecast is ${bestPm} µg/m³ at ${cleanBestTime}, compared with ${baselinePm} µg/m³ at ${baselineTime} (${reduction}% lower forecast PM₂.₅).`,
       };
     }
 
+    const headline = isGrocery
+      ? `Buy groceries at ${cleanBestTime}`
+      : `${primaryAct.title} at ${cleanBestTime}`;
     return {
-      headline: `${primaryAct.title} at ${bestTime}`,
-      explanation: `${pickupStay}Forecast PM₂.₅ is ${bestPm} µg/m³ at ${bestTime}, fitting within your schedule.`,
+      headline,
+      explanation: `${pickupStay}Forecast PM₂.₅ is ${bestPm} µg/m³ at ${cleanBestTime}, fitting within your schedule.`,
     };
   }, [factsResult, timeZone]);
+
+  const geminiIndoor = useMemo(
+    () => narrativeResult?.items?.find((i) => i.category === "indoor"),
+    [narrativeResult]
+  );
+  const displayedIndoorAction =
+    planStatus === "gemini_generated" && geminiIndoor
+      ? geminiIndoor.action
+      : (factsResult?.indoorRecommendations[0] || "Operate HEPA particle filtration indoors during peak pollution hours.");
+  const displayedIndoorWhy =
+    planStatus === "gemini_generated" && geminiIndoor?.whyItHelps
+      ? geminiIndoor.whyItHelps
+      : null;
 
   return (
     <section
@@ -388,16 +453,28 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       </div>
 
       {inputError && (
-        <div role="alert" className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
-          {inputError}
-          {availableRangeText && (
-            <span className="block mt-1 text-stone-500">Available forecast range: {availableRangeText}</span>
-          )}
+        <div
+          ref={errorAlertRef}
+          tabIndex={-1}
+          role="alert"
+          className="scroll-mt-24 focus:outline-none mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800"
+        >
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">{inputError}</p>
+              {availableRangeText && (
+                <p className="mt-1 text-stone-600">
+                  Available forecast range: <span className="font-mono">{availableRangeText}</span>
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
       {/* Schedule Form */}
-      <form onSubmit={handleBuildPlan} className="mt-4 space-y-4">
+      <form ref={formRef} onSubmit={handleBuildPlan} className="scroll-mt-24 mt-4 space-y-4">
         {/* Fixed Commitments Row (School pickup) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -416,7 +493,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
           </div>
 
           <div className="space-y-2">
-            {fixedCommitments.map((commitment) => (
+            {fixedCommitments.map((commitment, index) => (
               <div
                 key={commitment.id}
                 className="bg-stone-50 border border-stone-200/80 rounded-xl p-3 flex flex-wrap items-center gap-3"
@@ -426,6 +503,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                     Fixed Commitment Title
                   </label>
                   <input
+                    ref={index === 0 ? firstInputRef : undefined}
                     id={`comm-title-${commitment.id}`}
                     type="text"
                     value={commitment.title}
@@ -703,35 +781,45 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
 
       {/* Generated Output Worth Reading (Section 2) */}
       {factsResult && decisionOutput && (
-        <div className="mt-6 pt-5 border-t border-stone-200 space-y-4">
-          {/* Status Label & Retry */}
-          <div className="flex items-center justify-between text-xs">
-            <span
-              className={`px-2 py-0.5 rounded font-medium ${
-                planStatus === "gemini_generated"
-                  ? "bg-teal-50 text-teal-800 border border-teal-200"
-                  : "bg-stone-100 text-stone-700 border border-stone-200"
-              }`}
-            >
-              {planStatus === "gemini_generated" ? "Explained by Gemini" : "Forecast-based plan"}
+        <div ref={resultContainerRef} className="scroll-mt-24 mt-6 pt-5 border-t border-stone-200 space-y-4">
+          {/* Status Label & Mobile Edit Bar */}
+          <div className="flex items-center justify-between text-xs pb-1 border-b border-stone-100">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
+              Recommended Schedule
             </span>
 
-            {planStatus === "deterministic_fallback" && (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => handleBuildPlan()}
-                disabled={isGenerating}
-                className="flex items-center gap-1 text-[11px] text-teal-800 hover:text-teal-900 font-medium"
+                onClick={handleScrollToForm}
+                className="md:hidden flex items-center gap-1 text-[11px] font-medium text-teal-800 hover:text-teal-900 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60 transition"
+                aria-label="Edit schedule inputs"
               >
-                <RefreshCw className={`w-3 h-3 ${isGenerating ? "animate-spin" : ""}`} />
-                <span>Retry with Gemini</span>
+                <Edit3 className="w-3 h-3" />
+                <span>Edit inputs</span>
               </button>
-            )}
+
+              {planStatus === "deterministic_fallback" && (
+                <button
+                  type="button"
+                  onClick={() => handleBuildPlan()}
+                  disabled={isGenerating}
+                  className="flex items-center gap-1 text-[11px] text-teal-800 hover:text-teal-900 font-medium"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isGenerating ? "animate-spin" : ""}`} />
+                  <span>Retry with Gemini</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* 1. One Headline Giving the Actual Decision */}
           <div className="bg-teal-50/60 border border-teal-200/80 rounded-xl p-4">
-            <h3 className="text-lg font-bold text-teal-950 tracking-tight">
+            <h3
+              ref={resultHeadingRef}
+              tabIndex={-1}
+              className="scroll-mt-24 focus:outline-none text-lg font-bold text-teal-950 tracking-tight"
+            >
               {decisionOutput.headline}
             </h3>
             {/* 2. One Sentence Explaining Why That Hour Fits */}
@@ -771,9 +859,12 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
               {/* Flexible activities */}
               {factsResult.activities.map((act) => {
                 const best = act.bestCandidate;
-                const formattedTime = best
+                const startTime = best
                   ? formatHourlyTime(best.at, timeZone)
                   : "No eligible slot";
+                const endTime = best
+                  ? formatHourlyTime(new Date(Date.parse(best.at) + (act.durationMinutes || 60) * 60000).toISOString(), timeZone)
+                  : "";
                 const pmStr = best && best.pm25 !== null ? `${Math.round(best.pm25)} µg/m³` : "";
 
                 return (
@@ -787,7 +878,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-teal-900 font-mono">
-                        {formattedTime}
+                        <span>{startTime}</span>{endTime && <> – <span>{endTime}</span></>}
                       </span>
                       {pmStr && (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">
@@ -804,47 +895,58 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
           {/* 4. One Practical Indoor Action & One Realistic Transport Alternative */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             {/* Practical indoor action */}
-            {factsResult.indoorRecommendations.length > 0 && (
-              <div className="p-3 rounded-xl bg-white border border-stone-200 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
+            <div className="p-3.5 rounded-xl bg-white border border-stone-200 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-600 flex items-center gap-1.5">
                   <Shield className="w-3.5 h-3.5 text-stone-600" />
                   Indoor Action
                 </span>
-                <p className="text-stone-700 leading-snug">
-                  {factsResult.indoorRecommendations[0]}
-                </p>
+                <span
+                  data-testid="plan-status-badge"
+                  className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+                    planStatus === "gemini_generated"
+                      ? "bg-teal-50 text-teal-800 border border-teal-200"
+                      : "bg-stone-100 text-stone-700 border border-stone-200"
+                  }`}
+                >
+                  {planStatus === "gemini_generated" ? "Explained by Gemini" : "Forecast-based plan"}
+                </span>
               </div>
-            )}
+              <p className="text-stone-800 font-medium leading-relaxed" data-testid="household-indoor-action">
+                {displayedIndoorAction}
+              </p>
+              {displayedIndoorWhy && (
+                <p className="text-stone-500 text-[11px] leading-snug">
+                  {displayedIndoorWhy}
+                </p>
+              )}
+            </div>
 
             {/* Realistic transport alternative */}
-            {factsResult.transportComparison ? (
-              <div className="p-3 rounded-xl bg-white border border-stone-200 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
+            <div className="p-3.5 rounded-xl bg-white border border-stone-200 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-600 flex items-center gap-1.5">
                   <Leaf className="w-3.5 h-3.5 text-teal-700" />
                   Transport Alternative
                 </span>
-                <p className="text-stone-700 leading-snug">
-                  {factsResult.transportComparison.explanation}
-                </p>
-                {factsResult.transportComparison.estimatedCo2KgSaved !== null &&
-                  factsResult.transportComparison.estimatedCo2KgSaved > 0 && (
-                    <span className="block text-[11px] font-medium text-teal-800">
-                      Estimated savings: {factsResult.transportComparison.estimatedCo2KgSaved}{" "}
-                      {factsResult.transportComparison.units}
-                    </span>
-                  )}
+                {factsResult.transportComparison?.isEstimate && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 text-stone-600">
+                    Estimate
+                  </span>
+                )}
               </div>
-            ) : (
-              <div className="p-3 rounded-xl bg-white border border-stone-200 space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-                  <Leaf className="w-3.5 h-3.5 text-teal-700" />
-                  Transport Alternative
-                </span>
-                <p className="text-stone-700 leading-snug">
-                  Choose shared public transit or electric rail when commuting to minimize vehicle emissions.
-                </p>
-              </div>
-            )}
+              <p className="text-stone-800 leading-snug">
+                {factsResult.transportComparison?.explanation || defaultTransportAdvice}
+              </p>
+              {factsResult.transportComparison?.estimatedCo2KgSaved !== null &&
+                factsResult.transportComparison?.estimatedCo2KgSaved !== undefined &&
+                factsResult.transportComparison.estimatedCo2KgSaved > 0 && (
+                  <span className="inline-block text-[11px] font-medium text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60">
+                    Estimated savings: {factsResult.transportComparison.estimatedCo2KgSaved}{" "}
+                    {factsResult.transportComparison.units}
+                  </span>
+                )}
+            </div>
           </div>
 
           {/* 5. Expandable "How we calculated this" details */}

@@ -176,13 +176,32 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
       impactType: facts.transportComparison.impactType === "lower_exposure" ? "lower_exposure" : "lower_emissions",
     });
   } else {
+    const available = input.availableTransportModes || ["car", "transit", "walk", "bike", "ev"];
+    const hasTransit = available.includes("transit");
+    const hasActive = available.includes("walk") || available.includes("bike");
+    const hasEv = available.includes("ev");
+
+    let action = "Consolidate daily driving into a single trip or carpool to reduce vehicle emissions";
+    let why = "Quantitative emission savings are unavailable without trip distance. Combining errands cuts cold-start emissions.";
+
+    if (hasTransit) {
+      action = "Choose metro rail or electric transit over private combustion vehicles where available";
+      why = "Quantitative emission savings are unavailable without trip distance. Shifting to shared transit eliminates individual tailpipe emissions.";
+    } else if (hasEv) {
+      action = "Use electric vehicle with cabin air recirculation enabled";
+      why = "Prevents outside particulates from entering the cabin during peak pollution periods.";
+    } else if (hasActive) {
+      action = "Consider walking or cycling with a well-fitted N95 mask for short errands";
+      why = "Eliminates tailpipe emissions for short trips while filtering inhaled fine particles.";
+    }
+
     items.push({
       id: "transport-rec",
       category: "transport",
-      action: "Choose metro rail or electric transit over private combustion vehicles where available",
-      whyItHelps: "Quantitative emission savings are unavailable without trip distance. Shifting to shared transit eliminates individual tailpipe emissions.",
+      action,
+      whyItHelps: why,
       beneficiary: "Local community",
-      impactType: "lower_emissions",
+      impactType: hasTransit ? "lower_emissions" : "health_protection",
     });
   }
 
@@ -261,8 +280,10 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
    - Why it helps (whyItHelps)
    - Who benefits (beneficiary)
    - Impact type distinguishing lower_exposure, lower_emissions, or health_protection
-4. If an evidenceFactId is provided, it must strictly match one of the following valid fact IDs: ${JSON.stringify(validFactIds)}.
-5. Return JSON matching the schema.`;
+4. For the "indoor" category, provide one concise, actionable sentence tailored to this household's specific setup (e.g. particle filter status, sensitive members, budget level). It should give practical household advice that adds clear value beyond raw numbers.
+5. For the "transport" category, only suggest transport alternatives that exist in user preferences 'availableTransportModes': ${JSON.stringify(input.availableTransportModes || ["car", "transit", "walk", "bike", "ev"])}. If 'transit' is NOT in availableTransportModes, do NOT suggest public transit, bus, or metro; recommend carpooling, trip consolidation, or route optimization instead.
+6. If an evidenceFactId is provided, it must strictly match one of the following valid fact IDs: ${JSON.stringify(validFactIds)}.
+7. Return JSON matching the schema.`;
 
   const modelsToTry = [modelName];
   if (modelName !== "gemini-3-flash-preview") {
