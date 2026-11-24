@@ -238,15 +238,19 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
 
 /**
  * Calls Gemini API with structured output and verified factual inputs,
- * falling back gracefully if unconfigured or invalid.
+ * attempting primary and retry models confirmed available to the project,
+ * parsing and validating inside the retry loop, and enforcing an overall deadline.
+ * Falls back gracefully to deterministic facts if unconfigured, invalid, or timed out.
  */
 export async function generatePlan(
   input: PlanInput,
   facts: PlanFacts,
-  apiKey?: string
+  apiKey?: string,
+  overallTimeoutMs: number = 35000
 ): Promise<PlanGenerationResult> {
   const key = apiKey || process.env.GEMINI_API_KEY;
-  const modelName = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const retryModel = primaryModel === "gemini-3.5-flash-lite" ? "gemini-flash-lite-latest" : "gemini-3.5-flash-lite";
 
   if (!key || key === "your-gemini-api-key") {
     return {
@@ -285,21 +289,19 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
 6. If an evidenceFactId is provided, it must strictly match one of the following valid fact IDs: ${JSON.stringify(validFactIds)}.
 7. Return JSON matching the schema.`;
 
-  const candidateModels = [
-    modelName,
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-flash-lite-latest",
-    "gemini-3-flash-preview",
-    "gemini-3.8-flash",
-  ];
-  const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
-
-  let candidateText: string | null = null;
-  let successfulModel: string | null = null;
+  // Primary model with one confirmed-available retry model
+  const modelsToTry = [primaryModel, retryModel];
+  const overallDeadline = Date.now() + overallTimeoutMs;
+  let lastFallbackReason: "provider_error" | "invalid_output" | ValidationFailureReason = "provider_error";
 
   for (const currentModel of modelsToTry) {
+    const remainingMs = overallDeadline - Date.now();
+    if (remainingMs <= 500) {
+      console.warn("Overall request deadline reached, falling back to deterministic plan");
+      break;
+    }
+    const attemptTimeout = Math.min(10000, remainingMs);
+
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`;
       const res = await fetchWithTimeout(
@@ -350,70 +352,61 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
             },
           }),
         },
-        15000
+        attemptTimeout
       );
 
-      if (res.ok) {
-        const data = await res.json();
-        candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (candidateText) {
-          successfulModel = currentModel;
-          break;
-        }
-      } else {
+      if (!res.ok) {
         console.warn(`Gemini API call to ${currentModel} returned status: ${res.status}`);
+        lastFallbackReason = "provider_error";
+        if (res.status === 503 || res.status === 429) {
+          // Brief pause before trying the confirmed retry model during transient demand spikes
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        continue;
       }
+
+      const data = await res.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        console.warn(`Gemini API call to ${currentModel} returned empty text`);
+        lastFallbackReason = "invalid_output";
+        continue;
+      }
+
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(rawText);
+      } catch {
+        console.warn(`Gemini output from ${currentModel} was not valid JSON`);
+        lastFallbackReason = "invalid_output";
+        continue;
+      }
+
+      // Parse and validate candidate's output inside the retry loop
+      const valResult = validatePlanNarrative(parsedJson, facts);
+      if (!valResult.success) {
+        console.warn(`Plan validation failed for ${currentModel}: ${valResult.reason}`);
+        lastFallbackReason = valResult.reason;
+        continue;
+      }
+
+      // Only return gemini_generated after validation succeeds
+      return {
+        status: "gemini_generated",
+        modelUsed: currentModel,
+        narrative: valResult.narrative,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : "timeout/network";
       console.warn(`Gemini request to ${currentModel} failed: ${msg}`);
+      lastFallbackReason = "provider_error";
     }
   }
 
-  if (!candidateText || !successfulModel) {
-    return {
-      status: "deterministic_fallback",
-      modelUsed: null,
-      narrative: buildDeterministicNarrative(input, facts),
-      fallbackReason: "provider_error",
-    };
-  }
-
-  try {
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(candidateText);
-    } catch {
-      return {
-        status: "deterministic_fallback",
-        modelUsed: null,
-        narrative: buildDeterministicNarrative(input, facts),
-        fallbackReason: "invalid_output",
-      };
-    }
-
-    const valResult = validatePlanNarrative(parsedJson, facts);
-    if (!valResult.success) {
-      console.warn(`Plan validation fallback triggered: ${valResult.reason}`);
-      return {
-        status: "deterministic_fallback",
-        modelUsed: null,
-        narrative: buildDeterministicNarrative(input, facts),
-        fallbackReason: valResult.reason,
-      };
-    }
-
-    return {
-      status: "gemini_generated",
-      modelUsed: successfulModel,
-      narrative: valResult.narrative,
-    };
-  } catch (error) {
-    console.warn("Gemini parsing error occurred");
-    return {
-      status: "deterministic_fallback",
-      modelUsed: null,
-      narrative: buildDeterministicNarrative(input, facts),
-      fallbackReason: "provider_error",
-    };
-  }
+  return {
+    status: "deterministic_fallback",
+    modelUsed: null,
+    narrative: buildDeterministicNarrative(input, facts),
+    fallbackReason: lastFallbackReason,
+  };
 }

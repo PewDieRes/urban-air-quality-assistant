@@ -372,10 +372,184 @@ describe("grounded plan generation and validation", () => {
     const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
 
     expect(result.status).toBe("gemini_generated");
-    expect(result.modelUsed).toBe(process.env.GEMINI_MODEL || "gemini-3.5-flash");
+    expect(result.modelUsed).toBe(process.env.GEMINI_MODEL || "gemini-3.5-flash-lite");
     const [url, options] = vi.mocked(global.fetch).mock.calls[0];
     expect(String(url)).not.toContain("key=");
     expect(new Headers(options?.headers).get("x-goog-api-key")).toBe("test-api-key");
     expect(result.narrative.items).toHaveLength(4);
+  });
+
+  it("retries on invalid_fact_id: first model returns invalid fact ID, second returns valid plan", async () => {
+    const invalidFactIdJson = JSON.stringify({
+      summary: "First model with hallucinated fact id",
+      items: [
+        {
+          id: "rec-1",
+          category: "routine",
+          action: "Grocery trip at midnight",
+          whyItHelps: "Lower smog",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "nonexistent-fact-id",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Run filter",
+          whyItHelps: "Clean air",
+          beneficiary: "All",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Use metro",
+          whyItHelps: "Zero emissions",
+          beneficiary: "All",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-4",
+          category: "direct_impact",
+          action: "Avoid exercise",
+          whyItHelps: "Protects lungs",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+        },
+      ],
+    });
+
+    const validJson = JSON.stringify({
+      summary: "Second model valid response",
+      items: [
+        {
+          id: "rec-1",
+          category: "routine",
+          action: "Conduct Grocery trip at 6:00 PM",
+          whyItHelps: "Optimal slot with lower forecast PM2.5",
+          beneficiary: "All occupants",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Operate HEPA filter on high speed",
+          whyItHelps: "Filters particulate matter",
+          beneficiary: "Sensitive members",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Take Delhi Metro",
+          whyItHelps: "Avoids vehicle emissions",
+          beneficiary: "Community",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-4",
+          category: "direct_impact",
+          action: "Avoid vigorous outdoor running during evening peak",
+          whyItHelps: "Lowers particulate deposition",
+          beneficiary: "Cardiopulmonary health",
+          impactType: "lower_exposure",
+        },
+      ],
+    });
+
+    const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+    const retryModel = primaryModel === "gemini-3.5-flash-lite" ? "gemini-flash-lite-latest" : "gemini-3.5-flash-lite";
+
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: invalidFactIdJson }] } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: validJson }] } }],
+        }),
+      });
+
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
+
+    expect(result.status).toBe("gemini_generated");
+    expect(result.modelUsed).toBe(retryModel);
+    expect(result.narrative.summary).toBe("Second model valid response");
+    expect(result.narrative.items).toHaveLength(4);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(String(vi.mocked(global.fetch).mock.calls[0][0])).toContain(primaryModel);
+    expect(String(vi.mocked(global.fetch).mock.calls[1][0])).toContain(retryModel);
+  });
+
+  it("two invalid responses produce a forecast-based plan within the deadline", async () => {
+    const invalidFactIdJson = JSON.stringify({
+      summary: "Model hallucinating fact id",
+      items: [
+        {
+          id: "rec-1",
+          category: "routine",
+          action: "Trip",
+          whyItHelps: "Low smog",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "bad-id-1",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Filter",
+          whyItHelps: "Clean air",
+          beneficiary: "All",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Transit",
+          whyItHelps: "Emissions",
+          beneficiary: "All",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-4",
+          category: "direct_impact",
+          action: "Rest",
+          whyItHelps: "Lungs",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+        },
+      ],
+    });
+
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: invalidFactIdJson }] } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: invalidFactIdJson }] } }],
+        }),
+      });
+
+    const start = Date.now();
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key", 5000);
+    const elapsed = Date.now() - start;
+
+    expect(result.status).toBe("deterministic_fallback");
+    expect(result.fallbackReason).toBe("invalid_fact_id");
+    expect(result.modelUsed).toBeNull();
+    expect(result.narrative.items).toHaveLength(4);
+    expect(elapsed).toBeLessThan(5000);
   });
 });
