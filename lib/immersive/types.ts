@@ -54,3 +54,14 @@ export interface AirQualityViewProps {
   onSelectCoordinate: (coords: Coordinates) => void;
   onBuildPlan: () => void;
 }
+
+export interface ProviderStatus {
+  provider: string;
+  ready: boolean;
+  hasCredentials: boolean;
+  error: string | null;
+  errorType?: "missing_credential" | "denied" | "no_coverage" | "network" | "failed" | null;
+  geometryRendered: boolean;
+  mode: SceneMode;
+}
+

@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
-import { useThree } from "@react-three/fiber";
-import { TilesRenderer, TilesPlugin } from "3d-tiles-renderer/r3f";
+import { ThreeEvent } from "@react-three/fiber";
+import { TilesRenderer, TilesPlugin, TilesAttributionOverlay } from "3d-tiles-renderer/r3f";
 import {
   GoogleCloudAuthPlugin,
   CesiumIonAuthPlugin,
@@ -12,25 +12,21 @@ import {
   TileCompressionPlugin,
   TilesFadePlugin,
   UpdateOnChangePlugin,
+  ReorientationPlugin,
 } from "3d-tiles-renderer/plugins";
-import { CityAnchorPreset, SceneMode, Coordinates } from "@/lib/immersive/types";
-import { toGeodetic, toScene } from "@/lib/immersive/frame";
+import { CityAnchorPreset, SceneMode, Coordinates, ProviderStatus } from "@/lib/immersive/types";
+import { toGeodetic } from "@/lib/immersive/frame";
 
 interface CityTilesProps {
   anchor: CityAnchorPreset;
   sceneMode: SceneMode;
   onPickCoordinate?: (coords: Coordinates) => void;
-  onProviderStatus?: (status: {
-    provider: string;
-    ready: boolean;
-    hasCredentials: boolean;
-    error: string | null;
-  }) => void;
+  onProviderStatus?: (status: ProviderStatus) => void;
 }
 
 /**
- * Procedural textured 3D city block layout used when credentials are not configured,
- * or as an offline/instant benchmark scene. Provides realistic urban morphology,
+ * Procedural textured 3D city block layout used when real-city 3D tiles are not configured,
+ * or as an offline illustrative city benchmark scene. Provides realistic urban morphology,
  * distinct building heights, street grid, and ground terrain matching the anchor.
  */
 function ProceduralCityBlocks({
@@ -164,102 +160,268 @@ function ProceduralCityBlocks({
 }
 
 export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatus }: CityTilesProps) {
-  const { camera } = useThree();
-  const [providerError, setProviderError] = useState<string | null>(null);
+  const geometryRenderedRef = useRef<boolean>(false);
+  const activeAnchorIdRef = useRef<string>(anchor.id);
 
   const googleKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_TILE_KEY || "";
   const cesiumToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN || "";
 
-  const hasGoogleKey = Boolean(googleKey && googleKey.length > 10);
-  const hasCesiumToken = Boolean(cesiumToken && cesiumToken.length > 10);
+  const hasGoogleKey = Boolean(googleKey && googleKey.trim().length > 0);
+  const hasCesiumToken = Boolean(cesiumToken && cesiumToken.trim().length > 0);
 
-  // Determine active feed:
-  // If photorealistic selected and Google key present -> Google 3D Tiles
-  // If terrain-buildings selected and Cesium token present -> Cesium Ion
-  // Otherwise -> High-fidelity procedural 3D city mesh with real coordinates
-  const activeMode: SceneMode = useMemo(() => {
-    if (sceneMode === "photorealistic" && hasGoogleKey) return "photorealistic";
-    if (sceneMode === "terrain-buildings" && hasCesiumToken) return "terrain-buildings";
-    return "procedural";
-  }, [sceneMode, hasGoogleKey, hasCesiumToken]);
+  // Geographic reorientation parameters: centers (lat, lon, height) at Three.js scene origin (0, 0, 0)
+  // with +Y pointing Up, +X pointing West, +Z pointing North (OBJECT_FRAME)
+  const reorientationArgs = useMemo(() => {
+    return [
+      {
+        lat: (anchor.coordinates.lat * Math.PI) / 180,
+        lon: (anchor.coordinates.lon * Math.PI) / 180,
+        height: anchor.altitudeOffset || 0,
+        recenter: true,
+      },
+    ];
+  }, [anchor.coordinates.lat, anchor.coordinates.lon, anchor.altitudeOffset]);
 
+  // Synchronize anchor changes and initial provider readiness
   useEffect(() => {
-    if (sceneMode === "photorealistic" && !hasGoogleKey) {
+    activeAnchorIdRef.current = anchor.id;
+    geometryRenderedRef.current = false;
+
+    if (sceneMode === "photorealistic") {
+      if (!hasGoogleKey) {
+        onProviderStatus?.({
+          provider: "Google Photorealistic 3D Tiles",
+          ready: false,
+          hasCredentials: false,
+          error: "Google Map Tiles API key is not configured.",
+          errorType: "missing_credential",
+          geometryRendered: false,
+          mode: "photorealistic",
+        });
+      } else {
+        onProviderStatus?.({
+          provider: "Google Photorealistic 3D Tiles",
+          ready: false,
+          hasCredentials: true,
+          error: null,
+          errorType: null,
+          geometryRendered: false,
+          mode: "photorealistic",
+        });
+      }
+    } else if (sceneMode === "terrain-buildings") {
+      if (!hasCesiumToken) {
+        onProviderStatus?.({
+          provider: "Cesium Ion World Terrain & OSM Buildings",
+          ready: false,
+          hasCredentials: false,
+          error: "Cesium Ion token is not configured.",
+          errorType: "missing_credential",
+          geometryRendered: false,
+          mode: "terrain-buildings",
+        });
+      } else {
+        onProviderStatus?.({
+          provider: "Cesium Ion World Terrain & OSM Buildings",
+          ready: false,
+          hasCredentials: true,
+          error: null,
+          errorType: null,
+          geometryRendered: false,
+          mode: "terrain-buildings",
+        });
+      }
+    } else if (sceneMode === "procedural") {
+      geometryRenderedRef.current = true;
       onProviderStatus?.({
-        provider: "Google Photorealistic 3D Tiles",
-        ready: false,
-        hasCredentials: false,
-        error: "Google Map Tiles API key (NEXT_PUBLIC_GOOGLE_MAPS_TILE_KEY) is not configured.",
-      });
-    } else if (sceneMode === "terrain-buildings" && !hasCesiumToken) {
-      onProviderStatus?.({
-        provider: "Cesium ion World Terrain & OSM Buildings",
-        ready: false,
-        hasCredentials: false,
-        error: "Cesium ion token (NEXT_PUBLIC_CESIUM_ION_TOKEN) is not configured.",
-      });
-    } else {
-      onProviderStatus?.({
-        provider: activeMode === "photorealistic" ? "Google 3D Tiles" : activeMode === "terrain-buildings" ? "Cesium ion" : "Interactive 3D Urban Model",
+        provider: "Illustrative 3D City",
         ready: true,
         hasCredentials: true,
         error: null,
+        errorType: null,
+        geometryRendered: true,
+        mode: "procedural",
       });
     }
-  }, [sceneMode, activeMode, hasGoogleKey, hasCesiumToken, onProviderStatus]);
+  }, [
+    anchor.id,
+    anchor.coordinates.lat,
+    anchor.coordinates.lon,
+    sceneMode,
+    hasGoogleKey,
+    hasCesiumToken,
+    onProviderStatus,
+  ]);
 
-  const handlePickPoint = (point: THREE.Vector3) => {
-    if (!onPickCoordinate) return;
-    const geo = toGeodetic({ x: point.x, y: point.y, z: point.z }, {
-      lat: anchor.coordinates.lat,
-      lon: anchor.coordinates.lon,
-      alt: anchor.altitudeOffset,
-    });
-    onPickCoordinate({ lat: geo.lat, lon: geo.lon });
-  };
+  // Handlers for actual provider geometry rendering confirmation
+  const handleGeometryVisible = useCallback(() => {
+    if (!geometryRenderedRef.current) {
+      geometryRenderedRef.current = true;
+      const providerName =
+        sceneMode === "photorealistic"
+          ? "Google Photorealistic 3D Tiles"
+          : "Cesium Ion World Terrain & OSM Buildings";
+
+      onProviderStatus?.({
+        provider: providerName,
+        ready: true,
+        hasCredentials: true,
+        error: null,
+        errorType: null,
+        geometryRendered: true,
+        mode: sceneMode,
+      });
+    }
+  }, [sceneMode, onProviderStatus]);
+
+  const handleLoadModel = useCallback(() => {
+    handleGeometryVisible();
+  }, [handleGeometryVisible]);
+
+  const handleTileVisibilityChange = useCallback(
+    (event: { visible?: boolean }) => {
+      if (event?.visible) {
+        handleGeometryVisible();
+      }
+    },
+    [handleGeometryVisible]
+  );
+
+  const handleLoadError = useCallback(
+    (event: { tile?: any; error?: any; url?: any }) => {
+      const err = event?.error;
+      const errMsg = err?.message || String(err || "");
+      let errorType: "denied" | "no_coverage" | "network" | "failed" = "failed";
+      let descriptiveError = `Tile streaming failed: ${errMsg || "Unknown error"}`;
+
+      const lower = errMsg.toLowerCase();
+      if (
+        lower.includes("401") ||
+        lower.includes("403") ||
+        lower.includes("unauthorized") ||
+        lower.includes("forbidden") ||
+        lower.includes("key")
+      ) {
+        errorType = "denied";
+        descriptiveError = "Access denied by 3D tile provider. Please verify API key and restrictions.";
+      } else if (lower.includes("404") || lower.includes("not found")) {
+        errorType = "no_coverage";
+        descriptiveError = "3D imagery coverage is unavailable for this location.";
+      } else if (
+        lower.includes("failed to fetch") ||
+        lower.includes("network") ||
+        lower.includes("abort")
+      ) {
+        errorType = "network";
+        descriptiveError = "Network connection failed while streaming 3D tiles.";
+      }
+
+      onProviderStatus?.({
+        provider:
+          sceneMode === "photorealistic"
+            ? "Google Photorealistic 3D Tiles"
+            : "Cesium Ion World Terrain & OSM Buildings",
+        ready: false,
+        hasCredentials: true,
+        error: descriptiveError,
+        errorType,
+        geometryRendered: false,
+        mode: sceneMode,
+      });
+    },
+    [sceneMode, onProviderStatus]
+  );
+
+  const handlePickPoint = useCallback(
+    (point: THREE.Vector3) => {
+      if (!onPickCoordinate) return;
+      const geo = toGeodetic(
+        { x: point.x, y: point.y, z: point.z },
+        {
+          lat: anchor.coordinates.lat,
+          lon: anchor.coordinates.lon,
+          alt: anchor.altitudeOffset,
+        }
+      );
+      onPickCoordinate({ lat: geo.lat, lon: geo.lon });
+    },
+    [anchor, onPickCoordinate]
+  );
 
   return (
     <group name="city-tiles-root">
       {/* 1. Google Photorealistic 3D Tiles when credentials available */}
-      {activeMode === "photorealistic" && hasGoogleKey && (
-        <TilesRenderer
-          url={`https://tile.googleapis.com/v1/3dtiles/root.json?key=${googleKey}`}
+      {sceneMode === "photorealistic" && hasGoogleKey && (
+        <group
+          key={`group-google-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+          onClick={(e: ThreeEvent<MouseEvent>) => {
+            e.stopPropagation();
+            handlePickPoint(e.point);
+          }}
         >
-          <TilesPlugin plugin={GoogleCloudAuthPlugin} args={[{ apiToken: googleKey }]} />
-          <TilesPlugin plugin={GLTFExtensionsPlugin} />
-          <TilesPlugin plugin={TileCompressionPlugin} />
-          <TilesPlugin plugin={TilesFadePlugin} />
-          <TilesPlugin plugin={UpdateOnChangePlugin} />
-        </TilesRenderer>
-      )}
-
-      {/* 2. Cesium ion World Terrain & OSM Buildings when credentials available */}
-      {activeMode === "terrain-buildings" && hasCesiumToken && (
-        <group name="cesium-ion-layers">
-          {/* Cesium OSM Buildings (Asset 96188) */}
           <TilesRenderer
-            url="https://assets.ion.cesium.com/96188/tileset.json"
+            key={`google-tiles-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+            url={`https://tile.googleapis.com/v1/3dtiles/root.json?key=${googleKey}`}
+            onLoadModel={handleLoadModel}
+            onTileVisibilityChange={handleTileVisibilityChange}
+            onLoadError={handleLoadError}
           >
-            <TilesPlugin plugin={CesiumIonAuthPlugin} args={[{ apiToken: cesiumToken, assetId: 96188 }]} />
+            <TilesPlugin plugin={GoogleCloudAuthPlugin} args={[{ apiToken: googleKey }]} />
+            <TilesPlugin plugin={ReorientationPlugin} args={reorientationArgs} />
             <TilesPlugin plugin={GLTFExtensionsPlugin} />
             <TilesPlugin plugin={TileCompressionPlugin} />
             <TilesPlugin plugin={TilesFadePlugin} />
             <TilesPlugin plugin={UpdateOnChangePlugin} />
+            <TilesAttributionOverlay />
+          </TilesRenderer>
+        </group>
+      )}
+
+      {/* 2. Cesium Ion World Terrain & OSM Buildings when credentials available */}
+      {sceneMode === "terrain-buildings" && hasCesiumToken && (
+        <group
+          key={`group-cesium-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+          name="cesium-ion-layers"
+          onClick={(e: ThreeEvent<MouseEvent>) => {
+            e.stopPropagation();
+            handlePickPoint(e.point);
+          }}
+        >
+          {/* Cesium OSM Buildings (Asset 96188) */}
+          <TilesRenderer
+            key={`cesium-osm-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+            url="https://assets.ion.cesium.com/96188/tileset.json"
+            onLoadModel={handleLoadModel}
+            onTileVisibilityChange={handleTileVisibilityChange}
+            onLoadError={handleLoadError}
+          >
+            <TilesPlugin plugin={CesiumIonAuthPlugin} args={[{ apiToken: cesiumToken, assetId: "96188" }]} />
+            <TilesPlugin plugin={ReorientationPlugin} args={reorientationArgs} />
+            <TilesPlugin plugin={GLTFExtensionsPlugin} />
+            <TilesPlugin plugin={TileCompressionPlugin} />
+            <TilesPlugin plugin={TilesFadePlugin} />
+            <TilesPlugin plugin={UpdateOnChangePlugin} />
+            <TilesAttributionOverlay />
           </TilesRenderer>
 
           {/* Cesium World Terrain (Asset 1) */}
           <TilesRenderer
+            key={`cesium-terrain-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
             url="https://assets.ion.cesium.com/1/tileset.json"
+            onLoadModel={handleLoadModel}
+            onTileVisibilityChange={handleTileVisibilityChange}
+            onLoadError={handleLoadError}
           >
-            <TilesPlugin plugin={CesiumIonAuthPlugin} args={[{ apiToken: cesiumToken, assetId: 1 }]} />
+            <TilesPlugin plugin={CesiumIonAuthPlugin} args={[{ apiToken: cesiumToken, assetId: "1" }]} />
+            <TilesPlugin plugin={ReorientationPlugin} args={reorientationArgs} />
             <TilesPlugin plugin={QuantizedMeshPlugin} />
             <TilesPlugin plugin={UpdateOnChangePlugin} />
           </TilesRenderer>
         </group>
       )}
 
-      {/* 3. High-fidelity procedural 3D textured mesh (fallback or standalone) */}
-      {activeMode === "procedural" && (
+      {/* 3. High-fidelity procedural 3D textured mesh (when chosen explicitly or offline) */}
+      {sceneMode === "procedural" && (
         <ProceduralCityBlocks
           anchor={anchor}
           onPick={handlePickPoint}

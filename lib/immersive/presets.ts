@@ -30,7 +30,7 @@ export const DELHI_ANCHOR: CityAnchorPreset = {
   name: "Delhi-NCR (Central Connaught / Rajpath)",
   coordinates: { lat: 28.6139, lon: 77.209 },
   altitudeOffset: 215,
-  defaultMode: "terrain-buildings",
+  defaultMode: "photorealistic",
   cameraPresets: {
     home: {
       position: [0, 320, 450],

@@ -83,15 +83,33 @@ test.describe("Immersive 3D Smog Viewer E2E", () => {
     await expect(immersiveTab).toBeVisible();
     await immersiveTab.click();
 
-    // 2. Verify Immersive 3D UI elements load
-    await expect(page.getByText(/3D Scene/i)).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/Illustration of forecast pollution/i)).toBeVisible();
-    await expect(page.getByLabel("Show haze")).toBeVisible();
+    // 2. In unconfigured CI environment, explicit choice is presented
+    const exploreBtn = page.getByRole("button", { name: /explore illustrative city/i });
+    await exploreBtn.click({ timeout: 15000 });
+
+    // 3. Verify Immersive 3D UI elements and camera presets load
+    await expect(page.getByText(/Illustration of forecast pollution/i).first()).toBeVisible({ timeout: 10000 });
+    const hazeToggle = page.getByRole("checkbox", { name: /illustration of forecast pollution/i });
+    await expect(hazeToggle).toBeVisible();
+    await expect(hazeToggle).toBeChecked();
+
+    // Toggle haze off and back on
+    await hazeToggle.uncheck();
+    await expect(hazeToggle).not.toBeChecked();
+    await hazeToggle.check();
+    await expect(hazeToggle).toBeChecked();
+
+    // Verify presets
     await expect(page.getByRole("button", { name: /aerial/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /skyline/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /reset view/i })).toBeVisible();
 
-    // 3. Scrub forecast slider
+    // Click presets to exercise camera transitions
+    await page.getByRole("button", { name: /aerial/i }).click();
+    await page.getByRole("button", { name: /skyline/i }).click();
+    await page.getByRole("button", { name: /reset view/i }).click();
+
+    // 4. Scrub forecast slider
     const initialForecastRequests = forecastRequestCount;
     const scrubber = page.getByRole("slider", { name: /24-hour forecast time scrubber/i });
     await expect(scrubber).toBeVisible();
@@ -101,7 +119,7 @@ test.describe("Immersive 3D Smog Viewer E2E", () => {
     await page.waitForTimeout(300);
     expect(forecastRequestCount).toBe(initialForecastRequests);
 
-    // 4. Return to 2D map and verify seamless continuity
+    // 5. Return to 2D map and verify seamless continuity
     const backBtn = page.getByRole("button", { name: /back to 2d map/i });
     await expect(backBtn).toBeVisible();
     await backBtn.click();
@@ -126,8 +144,12 @@ test.describe("Immersive 3D Smog Viewer E2E", () => {
     const immersiveTab = page.getByRole("button", { name: /immersive 3d city/i });
     await immersiveTab.click();
 
+    // If explicit illustrative choice is shown, click it
+    const exploreBtn = page.getByRole("button", { name: /explore illustrative city/i });
+    await exploreBtn.click({ timeout: 15000 });
+
     await expect(page.getByText(/Tokyo/i).first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/Illustration of forecast pollution/i)).toBeVisible();
+    await expect(page.getByText(/Illustration of forecast pollution/i).first()).toBeVisible();
 
     // Verify Build Plan button exists in 3D view and scrolls to planner
     const buildPlanBtn = page.getByRole("button", { name: /build plan/i }).first();
