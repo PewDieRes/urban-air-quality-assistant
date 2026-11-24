@@ -46,19 +46,21 @@ vi.mock("@react-three/fiber", () => ({
   useFrame: vi.fn(),
 }));
 
-const MockOrbitControls = React.forwardRef(function MockOrbitControls(props: any, ref: any) {
-  React.useImperativeHandle(ref, () => ({
-    object: { position: { set: vi.fn() } },
-    target: { set: vi.fn() },
-    update: vi.fn(),
-  }));
-  return <div data-testid="orbit-controls" />;
-});
+vi.mock("@react-three/drei", () => {
+  const MockOrbitControls = React.forwardRef(function MockOrbitControls(props: any, ref: any) {
+    React.useImperativeHandle(ref, () => ({
+      object: { position: { set: vi.fn() } },
+      target: { set: vi.fn() },
+      update: vi.fn(),
+    }));
+    return <div data-testid="orbit-controls" />;
+  });
 
-vi.mock("@react-three/drei", () => ({
-  OrbitControls: MockOrbitControls,
-  PerspectiveCamera: () => <div data-testid="perspective-camera" />,
-}));
+  return {
+    OrbitControls: MockOrbitControls,
+    PerspectiveCamera: () => <div data-testid="perspective-camera" />,
+  };
+});
 
 describe("Immersive 3D City - Regression & Household Tests", () => {
   const originalEnv = process.env;
