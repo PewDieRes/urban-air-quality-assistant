@@ -247,7 +247,8 @@ export async function generatePlan(
   facts: PlanFacts,
   apiKey?: string,
   overallTimeoutMs: number = 35000,
-  requestId?: string
+  requestId?: string,
+  sleepFn: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 ): Promise<PlanGenerationResult> {
   const reqId = requestId || crypto.randomUUID();
   const key = apiKey || process.env.GEMINI_API_KEY;
@@ -404,11 +405,12 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
         );
         lastFallbackReason = "provider_error";
 
-        if (res.status === 503 || res.status === 429) {
+        const hasNextAttempt = attempt < modelsToTry.length && overallDeadline - Date.now() > 1000;
+        if ((res.status === 503 || res.status === 429) && hasNextAttempt) {
           // Brief pause within remaining overall budget before trying retry model
           const backoffMs = Math.min(1500, Math.max(0, overallDeadline - Date.now() - 500));
           if (backoffMs > 0) {
-            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            await sleepFn(backoffMs);
           }
         }
         continue;

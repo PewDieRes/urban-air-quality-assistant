@@ -120,7 +120,7 @@ it("renders distinctive validated Gemini sentence and badge on success", async (
   });
 
   view.rerender(<PlanPanel {...props} forecast={{ ...forecast }} />);
-  fireEvent.click(screen.getByRole("button", { name: /find a time|build my smog plan/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
 
   await waitFor(() => expect(fetchPlan).toHaveBeenCalledTimes(1));
 
@@ -163,7 +163,7 @@ it("omits distinctive Gemini sentence on fallback and displays forecast-based pl
   });
 
   view.rerender(<PlanPanel {...props} forecast={{ ...forecast }} />);
-  fireEvent.click(screen.getByRole("button", { name: /find a time|build my smog plan/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
 
   await waitFor(() => expect(fetchPlan).toHaveBeenCalledTimes(1));
 
@@ -273,7 +273,7 @@ it("renders retry model's validated guidance and 'Explained by Gemini' badge whe
   });
 
   view.rerender(<PlanPanel {...props} forecast={{ ...forecast }} />);
-  fireEvent.click(screen.getByRole("button", { name: /find a time|build my smog plan/i }));
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
 
   await waitFor(() => expect(fetchPlan).toHaveBeenCalledTimes(1));
 
@@ -283,4 +283,184 @@ it("renders retry model's validated guidance and 'Explained by Gemini' badge whe
 
   // Assert badge "Explained by Gemini" is displayed
   expect(screen.getByText("Explained by Gemini")).toBeTruthy();
+});
+
+it("clears stale Gemini attribution immediately on second submission while second request is pending, and renders second result alone", async () => {
+  const forecast = createTestForecast();
+  const FIRST_GEMINI_SENTENCE = "Sentence 1: Run HEPA filter during the morning peak.";
+  const SECOND_GEMINI_SENTENCE = "Sentence 2: Open windows briefly during early afternoon clean air window.";
+
+  let resolveSecondPlan: ((val: unknown) => void) | null = null;
+  const secondPlanPromise = new Promise((resolve) => {
+    resolveSecondPlan = resolve;
+  });
+
+  let callCount = 0;
+  const fetchPlan = vi.fn().mockImplementation(() => {
+    callCount++;
+    if (callCount === 1) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          status: "gemini_generated",
+          modelUsed: "gemini-3.5-flash-lite",
+          narrative: {
+            summary: "Plan 1 summary",
+            items: [
+              {
+                id: "rec-indoor-1",
+                category: "indoor",
+                action: FIRST_GEMINI_SENTENCE,
+                whyItHelps: "Indoor protection 1",
+                beneficiary: "All",
+                impactType: "health_protection",
+              },
+            ],
+          },
+        }),
+      });
+    }
+    // Second request is intentionally delayed
+    return secondPlanPromise;
+  });
+  vi.stubGlobal("fetch", fetchPlan);
+
+  const props = { forecast, lat: 28.6139, lon: 77.209, locationName: "Delhi-NCR" };
+  const view = render(<PlanPanel {...props} />);
+
+  // First submission: 16:00 to 20:00
+  fireEvent.change(screen.getByLabelText("Activity start", { exact: true }), {
+    target: { value: "2026-11-18T16:00" },
+  });
+  fireEvent.change(screen.getByLabelText("Activity end", { exact: true }), {
+    target: { value: "2026-11-18T20:00" },
+  });
+  view.rerender(<PlanPanel {...props} forecast={{ ...forecast }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
+
+  // Wait for first plan to complete
+  await screen.findByText(FIRST_GEMINI_SENTENCE);
+  expect(screen.getByText("Explained by Gemini")).toBeTruthy();
+
+  // Second submission with changed inputs in the same city: 14:00 to 18:00
+  fireEvent.change(screen.getByLabelText("Activity start", { exact: true }), {
+    target: { value: "2026-11-18T14:00" },
+  });
+  fireEvent.change(screen.getByLabelText("Activity end", { exact: true }), {
+    target: { value: "2026-11-18T18:00" },
+  });
+  view.rerender(<PlanPanel {...props} forecast={{ ...forecast }} />);
+
+  // Submit second plan
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
+
+  // IMMEDIATELY: Old Gemini sentence and "Explained by Gemini" badge must disappear!
+  expect(screen.queryByText(FIRST_GEMINI_SENTENCE)).toBeNull();
+  expect(screen.queryByText("Explained by Gemini")).toBeNull();
+  // Badge must show pending state
+  expect(screen.getByText("Checking Gemini...")).toBeTruthy();
+
+  // Resolve the delayed second request
+  resolveSecondPlan!({
+    ok: true,
+    json: async () => ({
+      status: "gemini_generated",
+      modelUsed: "gemini-3.5-flash-lite",
+      narrative: {
+        summary: "Plan 2 summary",
+        items: [
+          {
+            id: "rec-indoor-2",
+            category: "indoor",
+            action: SECOND_GEMINI_SENTENCE,
+            whyItHelps: "Indoor protection 2",
+            beneficiary: "All",
+            impactType: "health_protection",
+          },
+        ],
+      },
+    }),
+  });
+
+  // Second result alone appears
+  await screen.findByText(SECOND_GEMINI_SENTENCE);
+  expect(screen.getByText("Explained by Gemini")).toBeTruthy();
+  expect(screen.queryByText(FIRST_GEMINI_SENTENCE)).toBeNull();
+});
+
+it("preserves attribution to second plan as forecast-based when second submission fails after first succeeded", async () => {
+  const forecast = createTestForecast();
+  const FIRST_GEMINI_SENTENCE = "Sentence 1: Run HEPA filter during the morning peak.";
+
+  let callCount = 0;
+  const fetchPlan = vi.fn().mockImplementation(() => {
+    callCount++;
+    if (callCount === 1) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          status: "gemini_generated",
+          modelUsed: "gemini-3.5-flash-lite",
+          narrative: {
+            summary: "Plan 1 summary",
+            items: [
+              {
+                id: "rec-indoor-1",
+                category: "indoor",
+                action: FIRST_GEMINI_SENTENCE,
+                whyItHelps: "Indoor protection 1",
+                beneficiary: "All",
+                impactType: "health_protection",
+              },
+            ],
+          },
+        }),
+      });
+    }
+    // Second request returns provider failure
+    return Promise.resolve({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: { message: "Service Unavailable" } }),
+    });
+  });
+  vi.stubGlobal("fetch", fetchPlan);
+
+  const props = { forecast, lat: 28.6139, lon: 77.209, locationName: "Delhi-NCR" };
+  const view = render(<PlanPanel {...props} />);
+
+  // First submission
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
+  await screen.findByText(FIRST_GEMINI_SENTENCE);
+  expect(screen.getByText("Explained by Gemini")).toBeTruthy();
+
+  // Second submission with modified schedule
+  fireEvent.change(screen.getByLabelText("Activity start", { exact: true }), {
+    target: { value: "2026-11-18T15:00" },
+  });
+  view.rerender(<PlanPanel {...props} forecast={{ ...forecast }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
+
+  // Wait for second plan to finish with fallback
+  await screen.findByText("Forecast-based plan");
+
+  // Verify attribution belongs entirely to second plan:
+  // First sentence must NOT be displayed
+  expect(screen.queryByText(FIRST_GEMINI_SENTENCE)).toBeNull();
+  // "Explained by Gemini" must NOT be displayed
+  expect(screen.queryByText("Explained by Gemini")).toBeNull();
+  // Deterministic fallback recommendation should be rendered
+  expect(screen.getByText(/operate hepa air purifier/i)).toBeTruthy();
+});
+
+it("verifies primary action button accessible name is strictly 'Find a time'", () => {
+  const forecast = createTestForecast();
+  const props = { forecast, lat: 28.6139, lon: 77.209, locationName: "Delhi-NCR" };
+  render(<PlanPanel {...props} />);
+
+  const button = screen.getByRole("button", { name: "Find a time" });
+  expect(button).toBeTruthy();
+
+  // Ensure "Build My Smog Plan" is no longer the accessible name of the button
+  expect(screen.queryByRole("button", { name: "Build My Smog Plan" })).toBeNull();
 });

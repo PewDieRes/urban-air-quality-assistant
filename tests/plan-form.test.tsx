@@ -22,7 +22,7 @@ it.each([["Delhi-NCR", "Asia/Kolkata", "08:30", "09:30"], ["Tokyo", "Asia/Tokyo"
       fireEvent.change(screen.getByLabelText(label, {exact: true}), {target: {value: "2026-11-18T"+time}});
     }
     view.rerender(<PlanPanel {...props} forecast={{...forecast}} />);
-    fireEvent.click(screen.getByRole("button", {name: "Build My Smog Plan"}));
+    fireEvent.click(screen.getByRole("button", {name: "Find a time"}));
     await waitFor(() => expect(fetchPlan).toHaveBeenCalledTimes(1));
     const body = JSON.parse(fetchPlan.mock.calls[0][1].body);
     expect(body.input.fixedCommitments[0].start).toBe(`2026-11-18T${pickup}:00.000Z`);

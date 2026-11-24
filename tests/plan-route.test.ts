@@ -681,4 +681,28 @@ describe("grounded plan generation and validation", () => {
     expect(retrySuccessLog).toBeTruthy();
     consoleSpy.mockRestore();
   });
+
+  it("does not wait retry backoff on final failed attempt", async () => {
+    const mockSleep = vi.fn().mockResolvedValue(undefined);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({ error: { status: "UNAVAILABLE" } }),
+    });
+
+    const result = await generatePlan(
+      sampleInput,
+      sampleFacts,
+      "test-api-key",
+      5000,
+      "test-no-backoff-on-final",
+      mockSleep
+    );
+
+    expect(result.status).toBe("deterministic_fallback");
+    expect(result.fallbackReason).toBe("provider_error");
+    // Attempt 1 fails (503) -> hasNextAttempt is true (attempt 1 < 2) -> mockSleep called once
+    // Attempt 2 fails (503) -> hasNextAttempt is false (attempt 2 < 2 is false) -> mockSleep NOT called
+    expect(mockSleep).toHaveBeenCalledTimes(1);
+  });
 });

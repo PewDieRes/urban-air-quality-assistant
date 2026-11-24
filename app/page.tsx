@@ -24,22 +24,55 @@ export default function HomePage() {
 
   const planRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  const forecastSeqRef = useRef<number>(0);
+  const forecastAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      forecastAbortRef.current?.abort();
+    };
+  }, []);
+
+  const getScrollBehavior = (): ScrollBehavior => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      return "auto";
+    }
+    return "smooth";
+  };
 
   const fetchForecast = useCallback(async () => {
+    forecastAbortRef.current?.abort();
+    const controller = new AbortController();
+    forecastAbortRef.current = controller;
+    const currentSeq = ++forecastSeqRef.current;
+
     setIsLoadingForecast(true);
     setForecastError(null);
     try {
-      const res = await fetch(`/api/forecast?lat=${coordinates.lat}&lon=${coordinates.lon}`);
+      const res = await fetch(`/api/forecast?lat=${coordinates.lat}&lon=${coordinates.lon}`, {
+        signal: controller.signal,
+      });
+      if (currentSeq !== forecastSeqRef.current || controller.signal.aborted) {
+        return;
+      }
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.error?.message || "Failed to retrieve forecast data");
       }
       const data = await res.json();
+      if (currentSeq !== forecastSeqRef.current || controller.signal.aborted) {
+        return;
+      }
       setForecast(data.forecast);
     } catch (err: unknown) {
+      if (currentSeq !== forecastSeqRef.current || controller.signal.aborted) {
+        return;
+      }
       setForecastError(err instanceof Error ? err.message : "Unable to load forecast");
     } finally {
-      setIsLoadingForecast(false);
+      if (currentSeq === forecastSeqRef.current) {
+        setIsLoadingForecast(false);
+      }
     }
   }, [coordinates.lat, coordinates.lon]);
 
@@ -49,7 +82,9 @@ export default function HomePage() {
 
   const handleSelectLocation = (place: Place | null, coords: { lat: number; lon: number }) => {
     if (coords.lat !== coordinates.lat || coords.lon !== coordinates.lon) {
+      forecastAbortRef.current?.abort();
       setForecast(null);
+      setForecastError(null);
     }
     setSelectedPlace(place);
     setCoordinates(coords);
@@ -61,11 +96,11 @@ export default function HomePage() {
   };
 
   const handleScrollToPlan = () => {
-    planRef.current?.scrollIntoView({ behavior: "smooth" });
+    planRef.current?.scrollIntoView({ behavior: getScrollBehavior() });
   };
 
   const handleScrollToMap = () => {
-    mapRef.current?.scrollIntoView({ behavior: "smooth" });
+    mapRef.current?.scrollIntoView({ behavior: getScrollBehavior() });
   };
 
   const locationName = selectedPlace ? selectedPlace.name : "Selected Location";

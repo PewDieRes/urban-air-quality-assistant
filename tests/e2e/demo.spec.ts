@@ -253,7 +253,7 @@ test.describe("Urban Air Quality Assistant", () => {
         await planner.getByLabel(label, {exact: true}).fill("2026-11-18T" + time);
       }
       const request = page.waitForRequest(req => new URL(req.url()).pathname === "/api/plan");
-      await planner.getByRole("button", {name: "Build My Smog Plan", exact: true}).click();
+      await planner.getByRole("button", {name: "Find a time", exact: true}).click();
       expect((await request).postDataJSON().input.fixedCommitments[0].start).toBe(`2026-11-18T${utc}:00.000Z`);
       await expect(planner.getByText("6:00 PM", {exact: true}).first()).toBeVisible();
       await expect(planner.getByText("3:00 PM - 3:30 PM")).toBeVisible();
