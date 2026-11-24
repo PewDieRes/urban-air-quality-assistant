@@ -246,7 +246,7 @@ export async function generatePlan(
   apiKey?: string
 ): Promise<PlanGenerationResult> {
   const key = apiKey || process.env.GEMINI_API_KEY;
-  const modelName = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-3.5-flash";
 
   if (!key || key === "your-gemini-api-key") {
     return {
@@ -285,10 +285,16 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
 6. If an evidenceFactId is provided, it must strictly match one of the following valid fact IDs: ${JSON.stringify(validFactIds)}.
 7. Return JSON matching the schema.`;
 
-  const modelsToTry = [modelName];
-  if (modelName !== "gemini-3-flash-preview") {
-    modelsToTry.push("gemini-3-flash-preview");
-  }
+  const candidateModels = [
+    modelName,
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
+    "gemini-3-flash-preview",
+    "gemini-3.8-flash",
+  ];
+  const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
 
   let candidateText: string | null = null;
   let successfulModel: string | null = null;
@@ -344,7 +350,7 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
             },
           }),
         },
-        25000
+        15000
       );
 
       if (res.ok) {
@@ -355,10 +361,11 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
           break;
         }
       } else {
-        console.warn(`Gemini API call returned status: ${res.status}`);
+        console.warn(`Gemini API call to ${currentModel} returned status: ${res.status}`);
       }
-    } catch {
-      console.warn("Gemini request failed to complete");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "timeout/network";
+      console.warn(`Gemini request to ${currentModel} failed: ${msg}`);
     }
   }
 

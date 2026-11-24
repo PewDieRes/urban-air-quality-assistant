@@ -176,9 +176,34 @@ async function run() {
     results.currentCityPlan = "tokyo";
     console.log("Submitting Tokyo live plan request...");
     const tokyoSubmitBtn = page.locator("button[type='submit']").first();
-    await tokyoSubmitBtn.click();
-    await page.waitForTimeout(5000);
+    const [tokyoResponse] = await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/api/plan") && res.request().method() === "POST"),
+      tokyoSubmitBtn.click(),
+    ]);
+    const tokyoJson = await tokyoResponse.json();
+    console.log("Tokyo API response:", tokyoJson.status, tokyoJson.modelUsed);
+
+    // Wait for the plan status badge to show
+    const tokyoBadgeLocator = page.locator("[data-testid='plan-status-badge']");
+    await tokyoBadgeLocator.waitFor({ state: "visible", timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    const tokyoBadge = await tokyoBadgeLocator.textContent();
+    const tokyoHeadline = await page.locator("h3.text-lg, h3.text-xl, h3.text-2xl").first().textContent().catch(() => null);
+    const tokyoIndoorAction = await page.locator("[data-testid='household-indoor-action']").textContent().catch(() => null);
+    results.tokyoPlan.status = tokyoJson.status;
+    results.tokyoPlan.modelUsed = tokyoJson.modelUsed;
+    results.tokyoPlan.fallbackReason = tokyoJson.fallbackReason || null;
+    results.tokyoPlan.badge = tokyoBadge?.trim();
+    results.tokyoPlan.headline = tokyoHeadline?.trim();
+    results.tokyoPlan.indoorAction = tokyoIndoorAction?.trim();
     console.log("Tokyo Plan result:", results.tokyoPlan);
+
+    // Capture desktop Tokyo generated plan screenshot
+    const tokyoPlanScreenshot = path.join(screenshotsDir, "live-tokyo-plan-desktop.png");
+    const tokyoPlanArtifact = path.join(artifactsDir, "live-tokyo-plan-desktop.png");
+    await page.screenshot({ path: tokyoPlanScreenshot });
+    fs.copyFileSync(tokyoPlanScreenshot, tokyoPlanArtifact);
 
     // Switch back to Delhi for Delhi Live Plan
     results.currentCityPlan = "delhi";
@@ -187,7 +212,6 @@ async function run() {
     if (await delhiDemoBtn.isVisible()) {
       await delhiDemoBtn.click();
     } else {
-      // Use city selector / search
       const cityInput = page.locator("input[placeholder*='city' i]").first();
       if (await cityInput.isVisible()) {
         await cityInput.fill("Delhi");
@@ -197,9 +221,33 @@ async function run() {
     await page.waitForTimeout(2000);
 
     const delhiSubmitBtn = page.locator("button[type='submit']").first();
-    await delhiSubmitBtn.click();
-    await page.waitForTimeout(5000);
+    const [delhiResponse] = await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/api/plan") && res.request().method() === "POST"),
+      delhiSubmitBtn.click(),
+    ]);
+    const delhiJson = await delhiResponse.json();
+    console.log("Delhi API response:", delhiJson.status, delhiJson.modelUsed);
+
+    const delhiBadgeLocator = page.locator("[data-testid='plan-status-badge']");
+    await delhiBadgeLocator.waitFor({ state: "visible", timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    const delhiBadge = await delhiBadgeLocator.textContent();
+    const delhiHeadline = await page.locator("h3.text-lg, h3.text-xl, h3.text-2xl").first().textContent().catch(() => null);
+    const delhiIndoorAction = await page.locator("[data-testid='household-indoor-action']").textContent().catch(() => null);
+    results.delhiPlan.status = delhiJson.status;
+    results.delhiPlan.modelUsed = delhiJson.modelUsed;
+    results.delhiPlan.fallbackReason = delhiJson.fallbackReason || null;
+    results.delhiPlan.badge = delhiBadge?.trim();
+    results.delhiPlan.headline = delhiHeadline?.trim();
+    results.delhiPlan.indoorAction = delhiIndoorAction?.trim();
     console.log("Delhi Plan result:", results.delhiPlan);
+
+    // Capture desktop Delhi generated plan screenshot
+    const delhiPlanScreenshot = path.join(screenshotsDir, "live-delhi-plan-desktop.png");
+    const delhiPlanArtifact = path.join(artifactsDir, "live-delhi-plan-desktop.png");
+    await page.screenshot({ path: delhiPlanScreenshot });
+    fs.copyFileSync(delhiPlanScreenshot, delhiPlanArtifact);
 
     await context.close();
 
