@@ -552,4 +552,133 @@ describe("grounded plan generation and validation", () => {
     expect(result.narrative.items).toHaveLength(4);
     expect(elapsed).toBeLessThan(5000);
   });
+
+  it("detects response-body timeout when headers arrive promptly but body stream stalls", async () => {
+    const consoleSpy = vi.spyOn(console, "log");
+
+    // Mock fetch: headers arrive promptly (Promise resolves immediately), but reading body stalls until aborted
+    global.fetch = vi.fn().mockImplementation((url, options) => {
+      const signal = options?.signal;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () =>
+          new Promise((_, reject) => {
+            if (signal) {
+              signal.addEventListener("abort", () => {
+                const err = new Error("The operation was aborted");
+                err.name = "AbortError";
+                reject(err);
+              });
+            }
+          }),
+      });
+    });
+
+    const testRequestId = "test-body-timeout-id";
+    // 150ms timeout budget per attempt to keep tests fast
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key", 300, testRequestId);
+
+    expect(result.status).toBe("deterministic_fallback");
+    expect(result.fallbackReason).toBe("provider_error");
+
+    // Verify that the timeout was recorded as occurring during reading_body phase
+    const bodyTimeoutLogs = consoleSpy.mock.calls
+      .map((call) => call.join(" "))
+      .filter((line) => line.includes(`[plan:${testRequestId}]`) && line.includes("phase=reading_body"));
+
+    expect(bodyTimeoutLogs.length).toBeGreaterThanOrEqual(1);
+    consoleSpy.mockRestore();
+  });
+
+  it("recovers with valid plan when primary model times out but retry model succeeds", async () => {
+    const consoleSpy = vi.spyOn(console, "log");
+    const validJson = JSON.stringify({
+      summary: "Retry model succeeded after primary timed out",
+      items: [
+        {
+          id: "rec-1",
+          category: "routine",
+          action: "Conduct Grocery trip at 6:00 PM",
+          whyItHelps: "Optimal slot with lower forecast PM2.5",
+          beneficiary: "All occupants",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Operate HEPA filter on high speed",
+          whyItHelps: "Filters particulate matter",
+          beneficiary: "Sensitive members",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Take Delhi Metro",
+          whyItHelps: "Avoids vehicle emissions",
+          beneficiary: "Community",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-4",
+          category: "direct_impact",
+          action: "Avoid vigorous outdoor running during evening peak",
+          whyItHelps: "Lowers particulate deposition",
+          beneficiary: "Cardiopulmonary health",
+          impactType: "lower_exposure",
+        },
+      ],
+    });
+
+    const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+    const retryModel = primaryModel === "gemini-3.5-flash-lite" ? "gemini-flash-lite-latest" : "gemini-3.5-flash-lite";
+
+    let callCount = 0;
+    global.fetch = vi.fn().mockImplementation((url, options) => {
+      callCount++;
+      const signal = options?.signal;
+      if (callCount === 1) {
+        // Primary model times out before headers arrive
+        return new Promise((_, reject) => {
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }
+        });
+      }
+      // Retry model returns valid plan
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: validJson }] } }],
+          }),
+      });
+    });
+
+    const testRequestId = "test-primary-timeout-retry-success";
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key", 2000, testRequestId);
+
+    expect(result.status).toBe("gemini_generated");
+    expect(result.modelUsed).toBe(retryModel);
+    expect(result.narrative.summary).toBe("Retry model succeeded after primary timed out");
+    expect(result.narrative.items).toHaveLength(4);
+
+    const primaryTimeoutLog = consoleSpy.mock.calls
+      .map((call) => call.join(" "))
+      .find((line) => line.includes(`[plan:${testRequestId}]`) && line.includes("Attempt 1") && line.includes("outcome=timeout"));
+    const retrySuccessLog = consoleSpy.mock.calls
+      .map((call) => call.join(" "))
+      .find((line) => line.includes(`[plan:${testRequestId}]`) && line.includes("Attempt 2") && line.includes("outcome=success"));
+
+    expect(primaryTimeoutLog).toBeTruthy();
+    expect(retrySuccessLog).toBeTruthy();
+    consoleSpy.mockRestore();
+  });
 });

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { PlanInput, PlanFacts, PlanNarrative, PlanNarrativeItem } from "./types";
 import { formatHourlyTime } from "../forecast/open-meteo";
-import { fetchWithTimeout } from "../security/fetch-with-timeout";
 
 export const NarrativeItemSchema = z.object({
   id: z.string(),
@@ -239,20 +238,26 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
 /**
  * Calls Gemini API with structured output and verified factual inputs,
  * attempting primary and retry models confirmed available to the project,
- * parsing and validating inside the retry loop, and enforcing an overall deadline.
+ * parsing and validating inside the retry loop, keeping the abort timer active
+ * until the response body has been read, and enforcing an overall deadline.
  * Falls back gracefully to deterministic facts if unconfigured, invalid, or timed out.
  */
 export async function generatePlan(
   input: PlanInput,
   facts: PlanFacts,
   apiKey?: string,
-  overallTimeoutMs: number = 35000
+  overallTimeoutMs: number = 35000,
+  requestId?: string
 ): Promise<PlanGenerationResult> {
+  const reqId = requestId || crypto.randomUUID();
   const key = apiKey || process.env.GEMINI_API_KEY;
   const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
   const retryModel = primaryModel === "gemini-3.5-flash-lite" ? "gemini-flash-lite-latest" : "gemini-3.5-flash-lite";
 
   if (!key || key === "your-gemini-api-key") {
+    console.log(
+      `[plan:${reqId}] Plan result: status=deterministic_fallback, modelUsed=none, reason=missing_key`
+    );
     return {
       status: "deterministic_fallback",
       modelUsed: null,
@@ -294,90 +299,137 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
   const overallDeadline = Date.now() + overallTimeoutMs;
   let lastFallbackReason: "provider_error" | "invalid_output" | ValidationFailureReason = "provider_error";
 
+  let attempt = 0;
   for (const currentModel of modelsToTry) {
+    attempt++;
     const remainingMs = overallDeadline - Date.now();
-    if (remainingMs <= 500) {
-      console.warn("Overall request deadline reached, falling back to deterministic plan");
+    if (remainingMs <= 20) {
+      console.log(
+        `[plan:${reqId}] Overall request deadline reached (${remainingMs}ms remaining), falling back to deterministic plan`
+      );
       break;
     }
-    const attemptTimeout = Math.min(10000, remainingMs);
+    const modelsRemaining = modelsToTry.length - (attempt - 1);
+    const attemptBudget = modelsRemaining > 1 ? Math.floor(remainingMs / modelsRemaining) : remainingMs;
+    const attemptTimeout = Math.min(10000, Math.max(50, attemptBudget));
+    const startTime = new Date().toISOString();
+    const t0 = Date.now();
+
+    const controller = new AbortController();
+    let headersReceived = false;
+    let timedOutPhase: "before_headers" | "reading_body" | null = null;
+
+    const timeoutId = setTimeout(() => {
+      timedOutPhase = headersReceived ? "reading_body" : "before_headers";
+      controller.abort();
+    }, attemptTimeout);
 
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`;
-      const res = await fetchWithTimeout(
-        url,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: "application/json",
-              temperature: 0.2,
-              responseSchema: {
-                type: "OBJECT",
-                properties: {
-                  summary: { type: "STRING" },
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.2,
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                summary: { type: "STRING" },
+                items: {
+                  type: "ARRAY",
                   items: {
-                    type: "ARRAY",
-                    items: {
-                      type: "OBJECT",
-                      properties: {
-                        id: { type: "STRING" },
-                        category: {
-                          type: "STRING",
-                          enum: ["routine", "indoor", "transport", "direct_impact"],
-                        },
-                        action: { type: "STRING" },
-                        whyItHelps: { type: "STRING" },
-                        beneficiary: { type: "STRING" },
-                        impactType: {
-                          type: "STRING",
-                          enum: ["lower_exposure", "lower_emissions", "health_protection"],
-                        },
-                        evidenceFactId: {
-                          type: "STRING",
-                        },
+                    type: "OBJECT",
+                    properties: {
+                      id: { type: "STRING" },
+                      category: {
+                        type: "STRING",
+                        enum: ["routine", "indoor", "transport", "direct_impact"],
                       },
-                      required: ["id", "category", "action", "whyItHelps", "beneficiary", "impactType"],
+                      action: { type: "STRING" },
+                      whyItHelps: { type: "STRING" },
+                      beneficiary: { type: "STRING" },
+                      impactType: {
+                        type: "STRING",
+                        enum: ["lower_exposure", "lower_emissions", "health_protection"],
+                      },
+                      evidenceFactId: {
+                        type: "STRING",
+                      },
                     },
-                  },
-                  cautionNotes: {
-                    type: "ARRAY",
-                    items: { type: "STRING" },
+                    required: ["id", "category", "action", "whyItHelps", "beneficiary", "impactType"],
                   },
                 },
-                required: ["summary", "items"],
+                cautionNotes: {
+                  type: "ARRAY",
+                  items: { type: "STRING" },
+                },
               },
+              required: ["summary", "items"],
             },
-          }),
-        },
-        attemptTimeout
-      );
+          },
+        }),
+        signal: controller.signal,
+      });
 
-      if (!res.ok) {
-        console.warn(`Gemini API call to ${currentModel} returned status: ${res.status}`);
-        lastFallbackReason = "provider_error";
-        if (res.status === 503 || res.status === 429) {
-          // Brief pause before trying the confirmed retry model during transient demand spikes
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-        }
-        continue;
+      headersReceived = true;
+
+      // Keep the abort timer active until the Gemini response body has been read
+      let rawText: string;
+      if (typeof res.text === "function") {
+        rawText = await res.text();
+      } else if (typeof res.json === "function") {
+        const jsonBody = await res.json();
+        rawText = typeof jsonBody === "string" ? jsonBody : JSON.stringify(jsonBody);
+      } else {
+        rawText = "";
       }
 
-      const data = await res.json();
-      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) {
-        console.warn(`Gemini API call to ${currentModel} returned empty text`);
-        lastFallbackReason = "invalid_output";
+      clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - t0;
+
+      if (!res.ok) {
+        let googleErrorStatus: string | undefined;
+        try {
+          const errData = JSON.parse(rawText);
+          googleErrorStatus = errData?.error?.status;
+        } catch {
+          // ignore error body parse failure
+        }
+
+        console.log(
+          `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=http_error status=${res.status}${googleErrorStatus ? ` googleStatus=${googleErrorStatus}` : ""}`
+        );
+        lastFallbackReason = "provider_error";
+
+        if (res.status === 503 || res.status === 429) {
+          // Brief pause within remaining overall budget before trying retry model
+          const backoffMs = Math.min(1500, Math.max(0, overallDeadline - Date.now() - 500));
+          if (backoffMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          }
+        }
         continue;
       }
 
       let parsedJson: unknown;
       try {
-        parsedJson = JSON.parse(rawText);
+        const data = JSON.parse(rawText);
+        const textPart = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!textPart) {
+          console.log(
+            `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=empty_output`
+          );
+          lastFallbackReason = "invalid_output";
+          continue;
+        }
+        parsedJson = JSON.parse(textPart);
       } catch {
-        console.warn(`Gemini output from ${currentModel} was not valid JSON`);
+        console.log(
+          `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=invalid_output`
+        );
         lastFallbackReason = "invalid_output";
         continue;
       }
@@ -385,10 +437,19 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
       // Parse and validate candidate's output inside the retry loop
       const valResult = validatePlanNarrative(parsedJson, facts);
       if (!valResult.success) {
-        console.warn(`Plan validation failed for ${currentModel}: ${valResult.reason}`);
+        console.log(
+          `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=validation_error reason=${valResult.reason}`
+        );
         lastFallbackReason = valResult.reason;
         continue;
       }
+
+      console.log(
+        `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=success`
+      );
+      console.log(
+        `[plan:${reqId}] Plan result: status=gemini_generated, modelUsed=${currentModel}, reason=none`
+      );
 
       // Only return gemini_generated after validation succeeds
       return {
@@ -396,12 +457,27 @@ A percentage difference describes lower forecast PM₂.₅ concentration at the 
         modelUsed: currentModel,
         narrative: valResult.narrative,
       };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "timeout/network";
-      console.warn(`Gemini request to ${currentModel} failed: ${msg}`);
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - t0;
+      const isAbort = (err as { name?: string })?.name === "AbortError" || timedOutPhase !== null;
+
+      if (isAbort && timedOutPhase) {
+        console.log(
+          `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=timeout phase=${timedOutPhase}`
+        );
+      } else {
+        console.log(
+          `[plan:${reqId}] Attempt ${attempt} (${currentModel}) start=${startTime} elapsed=${elapsedMs}ms outcome=network_error`
+        );
+      }
       lastFallbackReason = "provider_error";
     }
   }
+
+  console.log(
+    `[plan:${reqId}] Plan result: status=deterministic_fallback, modelUsed=none, reason=${lastFallbackReason}`
+  );
 
   return {
     status: "deterministic_fallback",
