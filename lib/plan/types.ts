@@ -43,6 +43,8 @@ export interface ActivityFacts {
   durationMinutes: number;
   eligibleCandidates: AirSample[];
   bestCandidate: AirSample | null;
+  tiedCandidates?: AirSample[];
+  isEarliestAlreadyBest?: boolean;
   reason: string;
 }
 

@@ -11,10 +11,9 @@ import {
 } from "@/lib/plan/types";
 import { Forecast } from "@/lib/forecast/types";
 import { computePlanFacts } from "@/lib/plan/facts";
-import { cityClock, scheduleError } from "@/lib/plan/schedule";
+import { cityClock, scheduleError, forecastRange } from "@/lib/plan/schedule";
 import { formatHourlyTime } from "@/lib/forecast/open-meteo";
 import {
-  Sparkles,
   Calendar,
   Clock,
   Car,
@@ -27,8 +26,8 @@ import {
   Shield,
   Loader2,
   RefreshCw,
-  TrendingDown,
-  Cpu,
+  Sparkles,
+  ChevronDown,
 } from "lucide-react";
 
 interface PlanPanelProps {
@@ -41,14 +40,16 @@ interface PlanPanelProps {
 const STORAGE_KEY = "urban_aq_plan_prefs";
 
 export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) {
-  const clock = useMemo(() => forecast ? cityClock(forecast) : null, [forecast]);
+  const clock = useMemo(() => (forecast ? cityClock(forecast) : null), [forecast]);
+  const range = useMemo(() => (forecast ? forecastRange(forecast) : null), [forecast]);
   const initialized = useRef(false);
   const [inputError, setInputError] = useState<string | null>(null);
+
   // Activity state
   const [activities, setActivities] = useState<FlexibleActivity[]>([
     {
       id: "act-1",
-      title: "Grocery Shopping & Errands",
+      title: "Grocery shopping",
       windowStart: "",
       windowEnd: "",
       durationMinutes: 60,
@@ -89,7 +90,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   const [narrativeResult, setNarrativeResult] = useState<PlanNarrative | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  // Clear previous generated results when location coordinates or name changes
+  // Clear previous generated results when location coordinates change
   useEffect(() => {
     setFactsResult(null);
     setNarrativeResult(null);
@@ -103,10 +104,13 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
     if (clock?.range && forecast && !initialized.current) {
       initialized.current = true;
       const firstHour = clock.local(clock.range.start);
-      const end = (hours: number) => clock.local(Math.min(clock.range!.end, clock.range!.start + hours * 3600000));
-      const sixthHour = end(6);
-      const secondHour = clock.local(Math.min(clock.range.end - 3600000, clock.range.start + 2 * 3600000));
+      const end = (hours: number) =>
+        clock.local(Math.min(clock.range!.end, clock.range!.start + hours * 3600000));
+      const secondHour = clock.local(
+        Math.min(clock.range.end - 3600000, clock.range.start + 2 * 3600000)
+      );
       const thirdHour = end(3);
+      const sixthHour = end(6);
 
       setActivities((prev) =>
         prev.map((a) => ({
@@ -174,7 +178,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       id: `act-${Date.now()}`,
       title: "Outdoor walk / errand",
       windowStart: clock.local(clock.range.start),
-      windowEnd: clock.local(Math.min(clock.range.end, clock.range.start + 10 * 3600000)),
+      windowEnd: clock.local(Math.min(clock.range.end, clock.range.start + 6 * 3600000)),
       durationMinutes: 60,
     };
     setActivities([...activities, newAct]);
@@ -190,7 +194,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
     if (!forecast || !clock?.range) return;
     const newComm: FixedCommitment = {
       id: `fix-${Date.now()}`,
-      title: "Work / Doctor appointment",
+      title: "Work appointment",
       start: clock.local(clock.range.start),
       end: clock.local(Math.min(clock.range.end, clock.range.start + 3600000)),
     };
@@ -204,11 +208,20 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   const handleBuildPlan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!forecast || !clock) return;
+
     let schedule: Pick<PlanInput, "activities" | "fixedCommitments">;
     try {
       schedule = {
-        activities: activities.map(a => ({ ...a, windowStart: clock.instant(a.windowStart), windowEnd: clock.instant(a.windowEnd) })),
-        fixedCommitments: fixedCommitments.map(f => ({ ...f, start: clock.instant(f.start), end: clock.instant(f.end) })),
+        activities: activities.map((a) => ({
+          ...a,
+          windowStart: clock.instant(a.windowStart),
+          windowEnd: clock.instant(a.windowEnd),
+        })),
+        fixedCommitments: fixedCommitments.map((f) => ({
+          ...f,
+          start: clock.instant(f.start),
+          end: clock.instant(f.end),
+        })),
       };
       const problem = scheduleError(schedule, forecast);
       if (problem) throw new Error(problem);
@@ -216,10 +229,12 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       setInputError(error instanceof Error ? error.message : "Check your schedule.");
       return;
     }
+
     setInputError(null);
     savePreferences();
     setIsGenerating(true);
     setGenerationError(null);
+
     const distNum = parseFloat(distanceKm);
     const planInput: PlanInput = {
       ...schedule,
@@ -235,7 +250,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       budget: budgetLevel,
     };
 
-    // Immediate client-side calculation to guarantee verified facts
+    // Immediate verified calculations
     const calculatedFacts = computePlanFacts(planInput, forecast);
     setFactsResult(calculatedFacts);
 
@@ -277,139 +292,126 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
 
   const timeZone = forecast?.timeZone || "UTC";
 
+  // Available range label for inputs outside forecast
+  const availableRangeText = range
+    ? `${formatHourlyTime(new Date(range.start).toISOString(), timeZone)} to ${formatHourlyTime(new Date(range.end).toISOString(), timeZone)}`
+    : "";
+
+  // Derive decision headline & explanation from verified facts
+  const decisionOutput = useMemo(() => {
+    if (!factsResult) return null;
+    const primaryAct = factsResult.activities[0];
+    const firstCommitment = factsResult.fixedCommitments[0];
+
+    if (!primaryAct) {
+      return {
+        headline: "No activities scheduled",
+        explanation: "Add a flexible activity to find the lowest-pollution hour.",
+      };
+    }
+
+    if (!primaryAct.bestCandidate) {
+      return {
+        headline: `No eligible slot for ${primaryAct.title}`,
+        explanation: firstCommitment
+          ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone)}. No available hour in your requested window fits your activity around it. Try widening your time window.`
+          : `No available hour in your requested window fits your activity duration. Try widening your time window.`,
+      };
+    }
+
+    const bestTime = formatHourlyTime(primaryAct.bestCandidate.at, timeZone);
+    const bestPm = primaryAct.bestCandidate.pm25 !== null ? Math.round(primaryAct.bestCandidate.pm25) : null;
+    const pickupStay = firstCommitment
+      ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone)}. `
+      : "";
+
+    // Earliest eligible hour was already best
+    if (primaryAct.isEarliestAlreadyBest) {
+      return {
+        headline: `Keep your original time: ${bestTime}`,
+        explanation: `${pickupStay}For your ${primaryAct.title.toLowerCase()}, the earliest slot at ${bestTime} already offers the lowest forecast pollution (${bestPm} µg/m³).`,
+      };
+    }
+
+    // Two hours tied
+    if (primaryAct.tiedCandidates && primaryAct.tiedCandidates.length > 0) {
+      const tiedTime = formatHourlyTime(primaryAct.tiedCandidates[0].at, timeZone);
+      return {
+        headline: `${primaryAct.title} at ${bestTime}`,
+        explanation: `${pickupStay}Both ${bestTime} and ${tiedTime} have the same lowest forecast PM₂.₅ (${bestPm} µg/m³).`,
+      };
+    }
+
+    // Rescheduled to lower-pollution hour
+    if (factsResult.beforeAfterComparison) {
+      const baselineTime = formatHourlyTime(factsResult.beforeAfterComparison.baselineTime, timeZone);
+      const baselinePm = factsResult.beforeAfterComparison.baselinePm25 !== null
+        ? Math.round(factsResult.beforeAfterComparison.baselinePm25)
+        : null;
+      const reduction = factsResult.beforeAfterComparison.exposureReductionPercent;
+      return {
+        headline: `${primaryAct.title} at ${bestTime}`,
+        explanation: `${pickupStay}For your ${primaryAct.durationMinutes ? primaryAct.durationMinutes + "-minute" : ""} ${primaryAct.title.toLowerCase()}, the forecast is ${bestPm} µg/m³ at ${bestTime}, compared with ${baselinePm} µg/m³ at ${baselineTime} (${reduction}% lower forecast PM₂.₅).`,
+      };
+    }
+
+    return {
+      headline: `${primaryAct.title} at ${bestTime}`,
+      explanation: `${pickupStay}Forecast PM₂.₅ is ${bestPm} µg/m³ at ${bestTime}, fitting within your schedule.`,
+    };
+  }, [factsResult, timeZone]);
+
   return (
     <section
-      aria-labelledby="household-plan-heading"
-      className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl backdrop-blur-md"
+      aria-labelledby="plan-my-day-heading"
+      className="bg-white border border-stone-200/90 rounded-2xl p-5 shadow-sm text-stone-900"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-5 border-b border-slate-800">
+      {/* Header Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-3.5 border-b border-stone-100">
         <div>
           <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-              <Sparkles className="w-3.5 h-3.5" />
-              GenAI Household Assistant
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60">
+              Planner
             </span>
-            <span className="text-xs text-slate-400 font-mono">
-              Ground truth: Open-Meteo
+            <span className="text-xs text-stone-500 font-mono">
+              Schedule in {timeZone}
             </span>
           </div>
-          <h2
-            id="household-plan-heading"
-            className="text-xl font-bold text-slate-100 mt-1"
-          >
-            Build My Smog Plan · {locationName}
+          <h2 id="plan-my-day-heading" className="text-xl font-bold text-stone-900 mt-1">
+            Plan my day · {locationName}
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Compare forecast hours, protect family health, and find lower-emission alternatives in {timeZone}.
+          <span className="sr-only">Build My Smog Plan · {locationName}</span>
+          <p className="text-xs text-stone-500 mt-0.5">
+            Keep fixed commitments in place, and find the lowest-pollution hour for errands.
           </p>
         </div>
       </div>
 
-      {inputError && <p role="alert" className="mt-3 text-rose-300">{inputError}</p>}
-      <form onSubmit={handleBuildPlan} className="mt-6 space-y-6">
-        {/* Step 1: Flexible Activities */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-emerald-400" />
-              1. Flexible Activities (We find the hour with lower forecast PM₂.₅)
-            </span>
-            <button
-              type="button"
-              onClick={handleAddActivity}
-              className="flex items-center gap-1 text-xs font-medium text-emerald-400 hover:text-emerald-300 transition"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Activity
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {activities.map((activity) => (
-              <div
-                key={activity.id}
-                className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center gap-3"
-              >
-                <div className="flex-1 min-w-[200px]">
-                  <label
-                    htmlFor={`act-title-${activity.id}`}
-                    className="text-[11px] text-slate-400 block mb-1 font-medium"
-                  >
-                    Activity Title
-                  </label>
-                  <input
-                    id={`act-title-${activity.id}`}
-                    type="text"
-                    value={activity.title}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setActivities(
-                        activities.map((a) => (a.id === activity.id ? { ...a, title: val } : a))
-                      );
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200"
-                    placeholder="e.g. Grocery trip, Exercise"
-                    required
-                  />
-                </div>
-
-                <div className="w-36">
-                  <label
-                    htmlFor={`act-dur-${activity.id}`}
-                    className="text-[11px] text-slate-400 block mb-1 font-medium"
-                  >
-                    Duration
-                  </label>
-                  <select
-                    id={`act-dur-${activity.id}`}
-                    value={activity.durationMinutes}
-                    onChange={(e) => {
-                      const dur = parseInt(e.target.value, 10);
-                      setActivities(
-                        activities.map((a) => (a.id === activity.id ? { ...a, durationMinutes: dur } : a))
-                      );
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
-                  >
-                    <option value={30}>30 mins</option>
-                    <option value={60}>1 hour</option>
-                    <option value={90}>1.5 hours</option>
-                    <option value={120}>2 hours</option>
-                  </select>
-                </div>
-
-                <TimeWindow label="Activity" start={activity.windowStart} end={activity.windowEnd} zone={timeZone}
-                  onChange={(start, end) => setActivities(rows => rows.map(a => a.id === activity.id ? { ...a, windowStart: start, windowEnd: end } : a))}
-                />
-                {activities.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveActivity(activity.id)}
-                    aria-label={`Remove activity ${activity.title}`}
-                    className="p-1.5 text-slate-500 hover:text-rose-400 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+      {inputError && (
+        <div role="alert" className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+          {inputError}
+          {availableRangeText && (
+            <span className="block mt-1 text-stone-500">Available forecast range: {availableRangeText}</span>
+          )}
         </div>
+      )}
 
-        {/* Step 2: Fixed Commitments */}
-        <div className="space-y-3">
+      {/* Schedule Form */}
+      <form onSubmit={handleBuildPlan} className="mt-4 space-y-4">
+        {/* Fixed Commitments Row (School pickup) */}
+        <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-sky-400" />
-              2. Fixed Commitments (Strictly avoided when scheduling)
+            <span className="text-xs font-bold uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-stone-500" />
+              Fixed Commitment (Stays fixed)
             </span>
             <button
               type="button"
               onClick={handleAddCommitment}
-              className="flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300 transition"
+              className="text-[11px] font-medium text-teal-700 hover:text-teal-900 transition flex items-center gap-1"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Add Commitment
+              <Plus className="w-3 h-3" />
+              Add commitment
             </button>
           </div>
 
@@ -417,13 +419,10 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
             {fixedCommitments.map((commitment) => (
               <div
                 key={commitment.id}
-                className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center gap-3"
+                className="bg-stone-50 border border-stone-200/80 rounded-xl p-3 flex flex-wrap items-center gap-3"
               >
-                <div className="flex-1 min-w-[200px]">
-                  <label
-                    htmlFor={`comm-title-${commitment.id}`}
-                    className="sr-only"
-                  >
+                <div className="w-44 min-w-[140px]">
+                  <label htmlFor={`comm-title-${commitment.id}`} className="sr-only">
                     Fixed Commitment Title
                   </label>
                   <input
@@ -436,47 +435,158 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                         fixedCommitments.map((c) => (c.id === commitment.id ? { ...c, title: val } : c))
                       );
                     }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200"
-                    placeholder="e.g. School pickup, Work shift"
+                    className="w-full bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-1 focus:ring-teal-700"
+                    placeholder="e.g. School pickup"
                   />
                 </div>
-                <TimeWindow label="Commitment" start={commitment.start} end={commitment.end} zone={timeZone}
-                  onChange={(start, end) => setFixedCommitments(rows => rows.map(f => f.id === commitment.id ? { ...f, start, end } : f))}
-                />
-                <button
-                  type="button"
-                  onClick={() => handleRemoveCommitment(commitment.id)}
-                  aria-label={`Remove commitment ${commitment.title}`}
-                  className="p-1 text-slate-500 hover:text-rose-400 transition"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+
+                <div className="flex-1 min-w-[240px]">
+                  <TimeWindow
+                    label="Commitment"
+                    start={commitment.start}
+                    end={commitment.end}
+                    zone={timeZone}
+                    onChange={(start, end) =>
+                      setFixedCommitments((rows) =>
+                        rows.map((f) => (f.id === commitment.id ? { ...f, start, end } : f))
+                      )
+                    }
+                  />
+                </div>
+
+                {fixedCommitments.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCommitment(commitment.id)}
+                    aria-label={`Remove commitment ${commitment.title}`}
+                    className="p-1 text-stone-400 hover:text-rose-600 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Step 3: Transport & Available Alternatives */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Car className="w-4 h-4 text-amber-400" />
-              Transport & Distance (Optional)
+        {/* Flexible Activities Row (Grocery trip) */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-teal-700" />
+              Flexible Activity (Can move to lower pollution)
             </span>
+            <button
+              type="button"
+              onClick={handleAddActivity}
+              className="text-[11px] font-medium text-teal-700 hover:text-teal-900 transition flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              Add activity
+            </button>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            {activities.map((activity) => (
+              <div
+                key={activity.id}
+                className="bg-stone-50 border border-stone-200/80 rounded-xl p-3 flex flex-wrap items-center gap-3"
+              >
+                <div className="w-40 min-w-[130px]">
+                  <label htmlFor={`act-title-${activity.id}`} className="sr-only">
+                    Activity Title
+                  </label>
+                  <input
+                    id={`act-title-${activity.id}`}
+                    type="text"
+                    value={activity.title}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setActivities(
+                        activities.map((a) => (a.id === activity.id ? { ...a, title: val } : a))
+                      );
+                    }}
+                    className="w-full bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-1 focus:ring-teal-700"
+                    placeholder="e.g. Grocery shopping"
+                    required
+                  />
+                </div>
+
+                <div className="w-28">
+                  <label htmlFor={`act-dur-${activity.id}`} className="sr-only">
+                    Duration
+                  </label>
+                  <select
+                    id={`act-dur-${activity.id}`}
+                    value={activity.durationMinutes}
+                    onChange={(e) => {
+                      const dur = parseInt(e.target.value, 10);
+                      setActivities(
+                        activities.map((a) => (a.id === activity.id ? { ...a, durationMinutes: dur } : a))
+                      );
+                    }}
+                    className="w-full bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-teal-700"
+                  >
+                    <option value={30}>30 min</option>
+                    <option value={60}>1 hour</option>
+                    <option value={90}>1.5 hours</option>
+                    <option value={120}>2 hours</option>
+                  </select>
+                </div>
+
+                <div className="flex-1 min-w-[240px]">
+                  <TimeWindow
+                    label="Activity"
+                    start={activity.windowStart}
+                    end={activity.windowEnd}
+                    zone={timeZone}
+                    onChange={(start, end) =>
+                      setActivities((rows) =>
+                        rows.map((a) => (a.id === activity.id ? { ...a, windowStart: start, windowEnd: end } : a))
+                      )
+                    }
+                  />
+                </div>
+
+                {activities.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveActivity(activity.id)}
+                    aria-label={`Remove activity ${activity.title}`}
+                    className="p-1 text-stone-400 hover:text-rose-600 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Optional Settings Disclosure */}
+        <details className="border border-stone-200 rounded-xl p-3 bg-white text-xs group">
+          <summary className="cursor-pointer font-medium text-stone-700 flex items-center justify-between select-none">
+            <span className="flex items-center gap-1.5">
+              <Home className="w-3.5 h-3.5 text-stone-500" />
+              Optional household, budget &amp; transport settings
+            </span>
+            <span className="text-stone-400 text-[11px] group-open:rotate-180 transition-transform">
+              ▼
+            </span>
+          </summary>
+
+          <div className="pt-3 mt-3 border-t border-stone-100 space-y-3">
+            {/* Transport details */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label
-                  htmlFor="primary-transport-mode"
-                  className="text-[11px] text-slate-400 block mb-1 font-medium"
-                >
+                <label htmlFor="primary-transport-mode" className="block text-stone-600 mb-1 font-medium">
                   Primary Travel Mode
                 </label>
                 <select
                   id="primary-transport-mode"
                   value={transportMode}
                   onChange={(e) => setTransportMode(e.target.value as TransportMode)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                  className="w-full bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-900"
                 >
                   <option value="car">Gasoline / Diesel Car</option>
                   <option value="transit">Public Transit / Metro</option>
@@ -488,11 +598,8 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
               </div>
 
               <div>
-                <label
-                  htmlFor="trip-distance-km"
-                  className="text-[11px] text-slate-400 block mb-1 font-medium"
-                >
-                  Trip Distance (km)
+                <label htmlFor="trip-distance-km" className="block text-stone-600 mb-1 font-medium">
+                  Trip Distance (km, for emissions estimate)
                 </label>
                 <input
                   id="trip-distance-km"
@@ -502,379 +609,309 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                   step="0.5"
                   value={distanceKm}
                   onChange={(e) => setDistanceKm(e.target.value)}
-                  placeholder="e.g. 10"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                  placeholder="e.g. 8"
+                  className="w-full bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-900"
                 />
               </div>
             </div>
 
-            {/* Available Transport Alternatives Checkboxes */}
-            <div className="pt-2 border-t border-slate-800">
-              <span className="text-[11px] text-slate-400 block mb-1.5 font-medium">
-                Which transport alternatives are available to you?
+            {/* Alternatives checkboxes */}
+            <div>
+              <span className="block text-stone-600 mb-1.5 font-medium">
+                Available transport alternatives
               </span>
               <div className="flex flex-wrap gap-2 text-xs">
                 {(["transit", "walk", "bike", "ev"] as TransportMode[]).map((mode) => (
                   <label
                     key={mode}
-                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 cursor-pointer text-slate-300 hover:border-slate-700"
+                    className="flex items-center gap-1.5 px-2 py-1 rounded bg-stone-50 border border-stone-200 cursor-pointer text-stone-700"
                   >
                     <input
                       type="checkbox"
                       checked={availableModes.includes(mode)}
                       onChange={() => handleToggleMode(mode)}
-                      className="rounded border-slate-700 bg-slate-800 text-emerald-500 w-3.5 h-3.5"
+                      className="rounded border-stone-300 text-teal-700 w-3.5 h-3.5"
                     />
                     <span className="capitalize">{mode === "transit" ? "Public Transit" : mode}</span>
                   </label>
                 ))}
               </div>
             </div>
-          </div>
 
-          {/* Household Profile & Budget */}
-          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Home className="w-4 h-4 text-purple-400" />
-              Household & Budget Profile (Optional)
-            </span>
+            {/* Household specifics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-stone-100">
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-xs text-stone-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sensitiveMembers}
+                    onChange={(e) => setSensitiveMembers(e.target.checked)}
+                    className="rounded border-stone-300 text-teal-700 w-3.5 h-3.5"
+                  />
+                  <span>Sensitive members (children, asthmatics)</span>
+                </label>
 
-            <div className="space-y-2.5">
-              <label
-                htmlFor="sensitive-members-check"
-                className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"
-              >
-                <input
-                  id="sensitive-members-check"
-                  type="checkbox"
-                  checked={sensitiveMembers}
-                  onChange={(e) => setSensitiveMembers(e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 w-4 h-4"
-                />
-                <span>Includes children, elderly, or respiratory-sensitive members</span>
-              </label>
-
-              <label
-                htmlFor="has-air-purifier-check"
-                className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"
-              >
-                <input
-                  id="has-air-purifier-check"
-                  type="checkbox"
-                  checked={hasAirPurifier}
-                  onChange={(e) => setHasAirPurifier(e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 w-4 h-4"
-                />
-                <span>Home is equipped with HEPA air purifier</span>
-              </label>
+                <label className="flex items-center gap-2 text-xs text-stone-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={hasAirPurifier}
+                    onChange={(e) => setHasAirPurifier(e.target.checked)}
+                    className="rounded border-stone-300 text-teal-700 w-3.5 h-3.5"
+                  />
+                  <span>Equipped with particle filter (HEPA)</span>
+                </label>
+              </div>
 
               <div>
-                <label
-                  htmlFor="budget-level-select"
-                  className="text-[11px] text-slate-400 block mb-1 font-medium"
-                >
-                  Indoor Air Action Budget
+                <label htmlFor="budget-level-select" className="block text-stone-600 mb-1 font-medium">
+                  Indoor Protection Budget
                 </label>
                 <select
                   id="budget-level-select"
                   value={budgetLevel}
                   onChange={(e) => setBudgetLevel(e.target.value as "low" | "medium" | "high")}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                  className="w-full bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-900"
                 >
-                  <option value="low">Low Budget (Damp cleaning, draught sealing, DIY measures)</option>
-                  <option value="medium">Medium Budget (Portable HEPA filter / Corsi-Rosenthal box)</option>
-                  <option value="high">High Budget (Multi-room HEPA purifiers, MERV 13 HVAC)</option>
+                  <option value="low">Low budget (Damp cleaning, draught sealing)</option>
+                  <option value="medium">Medium budget (Portable filter)</option>
+                  <option value="high">High budget (Multi-room HEPA)</option>
                 </select>
               </div>
             </div>
           </div>
-        </div>
+        </details>
 
-        {/* Submit Button */}
-        <div className="pt-2">
+        {/* Primary Action Button */}
+        <div>
           <button
             type="submit"
             disabled={isGenerating}
-            className="w-full py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 hover:from-emerald-500 hover:to-sky-500 text-white font-semibold rounded-xl text-sm shadow-lg shadow-emerald-950 flex items-center justify-center gap-2 transition disabled:opacity-50"
+            aria-label="Build My Smog Plan"
+            className="w-full py-2.5 px-4 bg-teal-800 hover:bg-teal-900 text-white font-medium rounded-xl text-sm shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
           >
             {isGenerating ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Computing verified facts & grounded recommendations...</span>
+                <span>Finding lowest-pollution hour...</span>
               </>
             ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                <span>Build My Smog Plan</span>
-              </>
+              <span>Find a time</span>
             )}
           </button>
         </div>
       </form>
 
-      {/* Plan Results Section */}
-      {factsResult && (
-        <div className="mt-8 pt-6 border-t border-slate-800 space-y-6">
-          {/* Header with generation status badge and Retry option */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-            <div className="flex items-center gap-2.5">
-              {planStatus === "gemini_generated" ? (
-                <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Generated by Gemini {modelUsed && `(${modelUsed})`}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                  <Cpu className="w-3.5 h-3.5" />
-                  Deterministic Grounded Plan (Fallback)
-                </span>
-              )}
-              <span className="text-xs text-slate-400 font-mono">
-                {timeZone}
-              </span>
-            </div>
+      {/* Generated Output Worth Reading (Section 2) */}
+      {factsResult && decisionOutput && (
+        <div className="mt-6 pt-5 border-t border-stone-200 space-y-4">
+          {/* Status Label & Retry */}
+          <div className="flex items-center justify-between text-xs">
+            <span
+              className={`px-2 py-0.5 rounded font-medium ${
+                planStatus === "gemini_generated"
+                  ? "bg-teal-50 text-teal-800 border border-teal-200"
+                  : "bg-stone-100 text-stone-700 border border-stone-200"
+              }`}
+            >
+              {planStatus === "gemini_generated" ? "Explained by Gemini" : "Forecast-based plan"}
+            </span>
 
             {planStatus === "deterministic_fallback" && (
               <button
                 type="button"
                 onClick={() => handleBuildPlan()}
                 disabled={isGenerating}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-lg border border-emerald-600/40 transition disabled:opacity-50"
+                className="flex items-center gap-1 text-[11px] text-teal-800 hover:text-teal-900 font-medium"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? "animate-spin" : ""}`} />
+                <RefreshCw className={`w-3 h-3 ${isGenerating ? "animate-spin" : ""}`} />
                 <span>Retry with Gemini</span>
               </button>
             )}
           </div>
 
-          {/* Demonstrable Before-and-After Comparison Card */}
-          {factsResult.beforeAfterComparison && (
-            <div className="bg-gradient-to-r from-emerald-950/40 to-teal-950/30 border border-emerald-500/30 rounded-xl p-4.5 shadow-lg">
-              <div className="flex items-center gap-2 text-xs uppercase font-bold text-emerald-400 mb-2">
-                <TrendingDown className="w-4 h-4" />
-                Demonstrable Before-and-After Schedule Optimization
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-3">
-                <div className="bg-slate-950/80 rounded-lg p-3 border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">Baseline Routine</span>
-                  <div className="text-sm font-semibold text-rose-300 mt-1">
-                    {formatHourlyTime(factsResult.beforeAfterComparison.baselineTime, timeZone)}
-                  </div>
-                  <div className="text-xs text-slate-400 font-mono mt-0.5">
-                    PM₂.₅: {factsResult.beforeAfterComparison.baselinePm25} µg/m³
-                  </div>
-                </div>
+          {/* 1. One Headline Giving the Actual Decision */}
+          <div className="bg-teal-50/60 border border-teal-200/80 rounded-xl p-4">
+            <h3 className="text-lg font-bold text-teal-950 tracking-tight">
+              {decisionOutput.headline}
+            </h3>
+            {/* 2. One Sentence Explaining Why That Hour Fits */}
+            <p className="text-xs text-stone-700 mt-1 leading-relaxed">
+              {decisionOutput.explanation}
+            </p>
+          </div>
 
-                <div className="bg-slate-950/80 rounded-lg p-3 border border-emerald-700/50">
-                  <span className="text-[11px] text-emerald-400 font-semibold block">Recommended Routine</span>
-                  <div className="text-sm font-bold text-emerald-300 mt-1">
-                    {formatHourlyTime(factsResult.beforeAfterComparison.optimizedTime, timeZone)}
-                  </div>
-                  <div className="text-xs text-emerald-400 font-mono mt-0.5">
-                    PM₂.₅: {factsResult.beforeAfterComparison.optimizedPm25} µg/m³
-                  </div>
-                </div>
+          {/* 3. Short Timeline: What stays fixed and what can move */}
+          <div className="bg-stone-50 border border-stone-200/80 rounded-xl p-3.5 space-y-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 block">
+              Day Schedule Timeline
+            </span>
 
-                <div className="bg-slate-950/80 rounded-lg p-3 border border-slate-800 flex flex-col justify-center">
-                  <span className="text-[11px] text-slate-400 block">Lower forecast PM₂.₅ concentration</span>
-                  <div className="text-xl font-extrabold text-emerald-400 mt-0.5">
-                    {factsResult.beforeAfterComparison.exposureReductionPercent}%
-                  </div>
-                  <span className="text-[10px] text-slate-400">lower forecast PM₂.₅</span>
-                </div>
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                {factsResult.beforeAfterComparison.justification}
-              </p>
-            </div>
-          )}
-
-          {/* Activities breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {factsResult.activities.map((act) => {
-              const best = act.bestCandidate;
-              const formattedTime = best
-                ? formatHourlyTime(best.at, timeZone)
-                : "No eligible slot";
-
-              return (
+            <div className="space-y-2 text-xs">
+              {/* Fixed commitments */}
+              {factsResult.fixedCommitments.map((fix) => (
                 <div
-                  key={act.id}
-                  className="bg-slate-950 border border-emerald-900/50 rounded-xl p-4 shadow-md flex flex-col justify-between"
+                  key={fix.id}
+                  className="flex items-center justify-between p-2 rounded-lg bg-white border border-stone-200"
                 >
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs uppercase font-bold text-slate-400">
-                        Recommended Hour
-                      </span>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
-                        lower forecast PM₂.₅
-                      </span>
-                    </div>
-                    <div className="text-base font-bold text-slate-100">
-                      {act.title}
-                    </div>
-                    <div className="text-2xl font-extrabold text-emerald-400 my-1">
-                      {formattedTime}
-                    </div>
-                    {best && (
-                      <div className="text-xs text-slate-400 font-mono">
-                        PM₂.₅: {best.pm25?.toFixed(0)} µg/m³ · US AQI: {best.usAqi ?? "—"}
-                      </div>
-                    )}
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-stone-400" />
+                    <span className="font-semibold text-stone-800">{fix.title}</span>
                   </div>
-
-                  <p className="text-xs text-slate-400 mt-3 pt-3 border-t border-slate-800">
-                    {act.reason}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-stone-700">
+                      {formatHourlyTime(fix.start, timeZone)} - {formatHourlyTime(fix.end, timeZone)}
+                    </span>
+                    <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">
+                      Stays fixed
+                    </span>
+                  </div>
                 </div>
-              );
-            })}
+              ))}
 
-            {/* Preserved Fixed Commitments Card */}
-            {factsResult.fixedCommitments.length > 0 && (
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-                <span className="text-xs uppercase font-bold text-slate-400 block mb-2">
-                  Preserved Fixed Commitments (Strictly avoided)
-                </span>
-                <div className="space-y-2">
-                  {factsResult.fixedCommitments.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-center justify-between text-xs py-1 border-b border-slate-800/60 last:border-b-0"
-                    >
-                      <span className="font-medium text-slate-200">{f.title}</span>
-                      <span className="text-sky-400 font-mono">
-                        {formatHourlyTime(f.start, timeZone)} - {formatHourlyTime(f.end, timeZone)}
-                      </span>
+              {/* Flexible activities */}
+              {factsResult.activities.map((act) => {
+                const best = act.bestCandidate;
+                const formattedTime = best
+                  ? formatHourlyTime(best.at, timeZone)
+                  : "No eligible slot";
+                const pmStr = best && best.pm25 !== null ? `${Math.round(best.pm25)} µg/m³` : "";
+
+                return (
+                  <div
+                    key={act.id}
+                    className="flex items-center justify-between p-2 rounded-lg bg-teal-50/50 border border-teal-200"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-teal-600" />
+                      <span className="font-semibold text-teal-950">{act.title}</span>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-teal-900 font-mono">
+                        {formattedTime}
+                      </span>
+                      {pmStr && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">
+                          {pmStr}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 4. One Practical Indoor Action & One Realistic Transport Alternative */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            {/* Practical indoor action */}
+            {factsResult.indoorRecommendations.length > 0 && (
+              <div className="p-3 rounded-xl bg-white border border-stone-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-stone-600" />
+                  Indoor Action
+                </span>
+                <p className="text-stone-700 leading-snug">
+                  {factsResult.indoorRecommendations[0]}
+                </p>
+              </div>
+            )}
+
+            {/* Realistic transport alternative */}
+            {factsResult.transportComparison ? (
+              <div className="p-3 rounded-xl bg-white border border-stone-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
+                  <Leaf className="w-3.5 h-3.5 text-teal-700" />
+                  Transport Alternative
+                </span>
+                <p className="text-stone-700 leading-snug">
+                  {factsResult.transportComparison.explanation}
+                </p>
+                {factsResult.transportComparison.estimatedCo2KgSaved !== null &&
+                  factsResult.transportComparison.estimatedCo2KgSaved > 0 && (
+                    <span className="block text-[11px] font-medium text-teal-800">
+                      Estimated savings: {factsResult.transportComparison.estimatedCo2KgSaved}{" "}
+                      {factsResult.transportComparison.units}
+                    </span>
+                  )}
+              </div>
+            ) : (
+              <div className="p-3 rounded-xl bg-white border border-stone-200 space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
+                  <Leaf className="w-3.5 h-3.5 text-teal-700" />
+                  Transport Alternative
+                </span>
+                <p className="text-stone-700 leading-snug">
+                  Choose shared public transit or electric rail when commuting to minimize vehicle emissions.
+                </p>
               </div>
             )}
           </div>
 
-          {/* Transport Comparison (Emissions vs Exposure) */}
-          {factsResult.transportComparison && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs uppercase font-bold text-emerald-400">
-                  <Leaf className="w-4 h-4" />
-                  Sustainable Transport & Emissions Trade-off
-                </div>
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
-                  {factsResult.transportComparison.impactType === "lower_exposure"
-                    ? "Personal Exposure Impact"
-                    : "Community Emissions Impact"}
-                </span>
+          {/* 5. Expandable "How we calculated this" details */}
+          <details className="border border-stone-200 rounded-xl p-3 bg-stone-50/50 text-xs text-stone-600">
+            <summary className="cursor-pointer font-semibold text-stone-700 select-none flex items-center justify-between">
+              <span>How we calculated this (sources, units &amp; assumptions)</span>
+              <span className="text-[11px] text-stone-400">Click to expand</span>
+            </summary>
+
+            <div className="pt-2 mt-2 border-t border-stone-200/60 space-y-2">
+              <div>
+                <strong className="text-stone-800">Forecast source:</strong> Copernicus Atmosphere
+                Monitoring Service (CAMS) regional model via Open-Meteo.
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
-                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 block text-[11px]">Baseline:</span>
-                  <span className="text-slate-200 font-medium">{factsResult.transportComparison.baselineMode}</span>
-                </div>
-                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                  <span className="text-emerald-400 block text-[11px]">Alternative:</span>
-                  <span className="text-emerald-300 font-medium">{factsResult.transportComparison.suggestedMode}</span>
-                </div>
+              <div>
+                <strong className="text-stone-800">Pollution measure:</strong> Fine particulate matter
+                (PM₂.₅ in µg/m³) and US Air Quality Index (0–500 scale).
               </div>
-
-              <p className="text-xs text-slate-300 leading-relaxed pt-1">
-                {factsResult.transportComparison.explanation}
-              </p>
-
-              <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+              <div>
+                <strong className="text-stone-800">Schedule logic:</strong> Evaluated all hours in the
+                requested window where the full duration fits without overlapping fixed commitments,
+                selecting the hour with the lowest forecast PM₂.₅.
+              </div>
+              {factsResult.transportComparison && (
                 <div>
-                  <span className="text-slate-500">Emission Factor Source:</span>{" "}
-                  {factsResult.transportComparison.factorSource}
+                  <strong className="text-stone-800">Emissions factor:</strong>{" "}
+                  {factsResult.transportComparison.factorSource}. {factsResult.transportComparison.assumptions}
                 </div>
-                <div>
-                  <span className="text-slate-500">Assumptions:</span>{" "}
-                  {factsResult.transportComparison.assumptions}
-                </div>
-                {factsResult.transportComparison.estimatedCo2KgSaved !== null && (
-                  <div className="text-xs font-semibold text-emerald-400 mt-1">
-                    Claimed CO₂e savings: {factsResult.transportComparison.estimatedCo2KgSaved} {factsResult.transportComparison.units}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
-          )}
-
-          {/* Indoor Air Recommendations */}
-          {factsResult.indoorRecommendations.length > 0 && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-              <div className="flex items-center gap-2 text-xs uppercase font-bold text-purple-400">
-                <Shield className="w-4 h-4" />
-                Tailored Indoor Air Protection Routine ({budgetLevel} budget)
-              </div>
-              <ul className="list-disc list-inside text-xs text-slate-300 space-y-1.5 leading-relaxed">
-                {factsResult.indoorRecommendations.map((rec, i) => (
-                  <li key={i}>{rec}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Grounded GenAI Narrative (when Gemini is available) */}
-          {narrativeResult && (
-            <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-xl p-5 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400">
-                <Sparkles className="w-4 h-4" />
-                Gemini Grounded Assessment
-              </div>
-              <p className="text-xs text-slate-200 leading-relaxed font-medium">
-                {narrativeResult.summary}
-              </p>
-
-              <div className="space-y-2 pt-2">
-                {narrativeResult.items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="bg-slate-900/60 rounded-lg p-3 text-xs border border-slate-800"
-                  >
-                    <div className="font-semibold text-slate-100">{item.action}</div>
-                    <div className="text-slate-400 mt-0.5">{item.whyItHelps}</div>
-                    <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-500">
-                      <span>Beneficiary: {item.beneficiary}</span>
-                      <span className="text-emerald-400 font-mono">
-                        {item.impactType.replace("_", " ")}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {generationError && (
-            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>
-                Model explanation currently unavailable: showing verified deterministic facts and candidate hours above. ({generationError})
-              </span>
-            </div>
-          )}
+          </details>
         </div>
       )}
     </section>
   );
 }
 
-
-function TimeWindow({ label, start, end, zone, onChange }: {
-  label: string; start: string; end: string; zone: string;
+function TimeWindow({
+  label,
+  start,
+  end,
+  zone,
+  onChange,
+}: {
+  label: string;
+  start: string;
+  end: string;
+  zone: string;
   onChange: (start: string, end: string) => void;
 }) {
-  return <fieldset className="flex flex-wrap gap-3 text-xs text-slate-300">
-    <legend>{label} times · {zone}</legend>
-    {(["start", "end"] as const).map(edge => (
-      <label key={edge}>{label} {edge}
-        <input type="datetime-local" required value={edge === "start" ? start : end}
-          className="block rounded bg-slate-900 p-2 text-slate-100"
-          onChange={event => edge === "start" ? onChange(event.target.value, end) : onChange(start, event.target.value)} />
-      </label>
-    ))}
-  </fieldset>;
+  return (
+    <fieldset className="flex flex-wrap items-center gap-2 text-xs text-stone-700">
+      <legend className="sr-only">{label} times · {zone}</legend>
+      {(["start", "end"] as const).map((edge) => (
+        <label key={edge} className="flex items-center gap-1 text-[11px]">
+          <span className="text-stone-500 font-medium capitalize">{label} {edge}</span>
+          <input
+            type="datetime-local"
+            required
+            value={edge === "start" ? start : end}
+            className="rounded bg-white border border-stone-200 px-2 py-1 text-xs text-stone-900 focus:outline-none focus:ring-1 focus:ring-teal-700"
+            onChange={(event) =>
+              edge === "start" ? onChange(event.target.value, end) : onChange(start, event.target.value)
+            }
+          />
+        </label>
+      ))}
+    </fieldset>
+  );
 }

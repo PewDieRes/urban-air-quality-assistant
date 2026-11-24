@@ -80,13 +80,21 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
     });
 
     const chosenCandidate = sorted[0];
+    const tiedCandidates = validCandidates.filter(
+      (c) => c.at !== chosenCandidate.at && c.pm25 !== null && c.pm25 === chosenCandidate.pm25
+    );
+    const isEarliestAlreadyBest = validCandidates.length > 0 && validCandidates[0].at === chosenCandidate.at;
     const start = Date.parse(chosenCandidate.at);
     scheduledIntervals.push({ start, end: start + durationMs });
     const localTime = formatHourlyTime(chosenCandidate.at, forecast.timeZone);
 
+    const tiePhrase = tiedCandidates.length > 0
+      ? ` (ties with ${tiedCandidates.map(t => formatHourlyTime(t.at, forecast.timeZone)).join(", ")})`
+      : "";
+
     const reason = `Available slot at ${localTime} with lower forecast PM₂.₅ (${chosenCandidate.pm25?.toFixed(
       0
-    )} µg/m³, US AQI: ${chosenCandidate.usAqi ?? "—"}), fitting entirely within the allowed window and avoiding fixed commitments.`;
+    )} µg/m³, US AQI: ${chosenCandidate.usAqi ?? "—"})${tiePhrase}, fitting entirely within the allowed window and avoiding fixed commitments.`;
 
     return {
       id: activity.id,
@@ -94,6 +102,8 @@ export function computePlanFacts(input: PlanInput, forecast: Forecast): PlanFact
       durationMinutes,
       eligibleCandidates: validCandidates,
       bestCandidate: chosenCandidate,
+      tiedCandidates,
+      isEarliestAlreadyBest,
       reason,
     };
   });

@@ -113,33 +113,49 @@ export function ForecastTimeline({
       )}
 
       {showLegend && (
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
-          <span className="text-slate-400 font-medium">US AQI Scale:</span>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-              Good (0-50)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" />
-              Moderate (51-100)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />
-              Sensitive (101-150)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
-              Unhealthy (151-200)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
-              Very Unhealthy (201-300)
-            </span>
-            <span className="flex items-center gap-1.5 text-slate-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-900 inline-block" />
-              Hazardous (301+)
-            </span>
+        <div className="flex flex-col gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
+          {/* PM2.5 Pollution Scale in µg/m³ matching overlay colors */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-slate-300 font-medium">PM₂.₅ Pollution Scale (µg/m³):</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                0–12 (Good)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" />
+                12–35 (Moderate)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />
+                35–55 (Sensitive)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                55–150 (Unhealthy)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
+                150–250 (Very Unhealthy)
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-900 inline-block" />
+                250+ (Hazardous)
+              </span>
+            </div>
+          </div>
+
+          {/* US AQI Reference scale */}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400 border-t border-slate-800/50 pt-1">
+            <span className="text-slate-500 font-medium">US AQI Index (0–500 scale):</span>
+            <div className="flex flex-wrap items-center gap-3 text-slate-400">
+              <span>0–50 Good</span>
+              <span>51–100 Moderate</span>
+              <span>101–150 Sensitive</span>
+              <span>151–200 Unhealthy</span>
+              <span>201–300 Very Unhealthy</span>
+              <span>301+ Hazardous</span>
+            </div>
           </div>
         </div>
       )}

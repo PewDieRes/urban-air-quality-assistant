@@ -35,6 +35,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # superpowers sdd
 .superpowers/sdd/*
 !.superpowers/sdd/.gitignore

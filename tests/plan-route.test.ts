@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   generatePlan,
+  validatePlanNarrative,
   validateAndSanitizePlanNarrative,
   buildDeterministicNarrative,
 } from "@/lib/plan/gemini";
@@ -135,7 +136,25 @@ describe("grounded plan generation and validation", () => {
     expect(routineItem?.whyItHelps).toContain("lower forecast PM₂.₅");
   });
 
-  it("rejects missing categories and requires all 4 categories: routine, indoor, transport, direct_impact", () => {
+  it("distinguishes invalid_structure error when response does not match JSON schema", () => {
+    const invalidStructure = {
+      summary: "Too short", // valid string, but items missing required fields
+      items: [
+        {
+          id: "rec-1",
+          // missing category, action, whyItHelps, beneficiary, impactType
+        },
+      ],
+    };
+
+    const result = validatePlanNarrative(invalidStructure, sampleFacts);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("invalid_structure");
+    }
+  });
+
+  it("distinguishes missing_categories when not all 4 categories are present", () => {
     // Missing 'direct_impact' category
     const missingCategory = {
       summary: "Incomplete plan",
@@ -168,10 +187,15 @@ describe("grounded plan generation and validation", () => {
       ],
     };
 
+    const result = validatePlanNarrative(missingCategory, sampleFacts);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("missing_categories");
+    }
     expect(validateAndSanitizePlanNarrative(missingCategory, sampleFacts)).toBeNull();
   });
 
-  it("rejects hallucinated fact IDs not present in facts", () => {
+  it("distinguishes invalid_fact_id when referencing hallucinated fact IDs", () => {
     const hallucinatedFactId = {
       summary: "Plan summary",
       items: [
@@ -211,7 +235,56 @@ describe("grounded plan generation and validation", () => {
       ],
     };
 
+    const result = validatePlanNarrative(hallucinatedFactId, sampleFacts);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("invalid_fact_id");
+    }
     expect(validateAndSanitizePlanNarrative(hallucinatedFactId, sampleFacts)).toBeNull();
+  });
+
+  it("falls back to deterministic narrative with missing_categories reason", async () => {
+    const missingCatJson = JSON.stringify({
+      summary: "Missing direct impact category",
+      items: [
+        {
+          id: "rec-1",
+          category: "routine",
+          action: "Grocery trip at verified hour",
+          whyItHelps: "Low exposure",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-2",
+          category: "indoor",
+          action: "Run HEPA filter",
+          whyItHelps: "Clean air",
+          beneficiary: "All",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-3",
+          category: "transport",
+          action: "Use public metro",
+          whyItHelps: "Zero car emissions",
+          beneficiary: "Community",
+          impactType: "lower_emissions",
+        },
+      ],
+    });
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: missingCatJson }] } }],
+      }),
+    });
+
+    const result = await generatePlan(sampleInput, sampleFacts, "test-api-key");
+    expect(result.status).toBe("deterministic_fallback");
+    expect(result.fallbackReason).toBe("missing_categories");
   });
 
   it("falls back to deterministic narrative on upstream provider error", async () => {

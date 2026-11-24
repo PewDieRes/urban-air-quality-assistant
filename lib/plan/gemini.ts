@@ -19,11 +19,17 @@ export const PlanNarrativeSchema = z.object({
   cautionNotes: z.array(z.string()).optional(),
 });
 
+export type ValidationFailureReason = "invalid_structure" | "missing_categories" | "invalid_fact_id";
+
+export type ValidationResult =
+  | { success: true; narrative: PlanNarrative }
+  | { success: false; reason: ValidationFailureReason };
+
 export interface PlanGenerationResult {
   status: "gemini_generated" | "deterministic_fallback";
   modelUsed: string | null;
   narrative: PlanNarrative;
-  fallbackReason?: "missing_key" | "provider_error" | "invalid_output" | "missing_categories" | "invalid_fact_id";
+  fallbackReason?: "missing_key" | "provider_error" | "invalid_output" | ValidationFailureReason;
 }
 
 const REQUIRED_CATEGORIES: Array<"routine" | "indoor" | "transport" | "direct_impact"> = [
@@ -37,11 +43,12 @@ const REQUIRED_CATEGORIES: Array<"routine" | "indoor" | "transport" | "direct_im
  * Validates generated JSON against schema, requires all 4 categories,
  * verifies fact IDs, and replaces any model-invented times/measurements with
  * server-calculated facts so that hallucinations never appear.
+ * Distinguishes invalid structure, missing categories, and unknown fact references.
  */
-export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts): PlanNarrative | null {
+export function validatePlanNarrative(raw: unknown, facts: PlanFacts): ValidationResult {
   const result = PlanNarrativeSchema.safeParse(raw);
   if (!result.success) {
-    return null;
+    return { success: false, reason: "invalid_structure" };
   }
 
   const validFactIds = new Set<string>([
@@ -53,7 +60,7 @@ export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts)
   const categoriesPresent = new Set(result.data.items.map((i) => i.category));
   for (const reqCat of REQUIRED_CATEGORIES) {
     if (!categoriesPresent.has(reqCat)) {
-      return null;
+      return { success: false, reason: "missing_categories" };
     }
   }
 
@@ -63,20 +70,20 @@ export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts)
   for (const item of result.data.items) {
     if (item.evidenceFactId) {
       if (!validFactIds.has(item.evidenceFactId)) {
-        console.warn("Gemini returned an unknown fact reference");
-        // Reject hallucinated fact ID reference
-        return null;
+        // Safe logging of reason code without personal inputs or secrets
+        console.warn("Validation failed: invalid_fact_id reference");
+        return { success: false, reason: "invalid_fact_id" };
       }
 
       // Check if referencing an activity
       const activityFact = facts.activities.find((a) => a.id === item.evidenceFactId);
       if (activityFact && activityFact.bestCandidate) {
-        // Enforce application ground truth for time and measurement
+        // Enforce application verified facts for time and measurement
         const verifiedTime = formatHourlyTime(activityFact.bestCandidate.at, facts.locationTimezone);
         const verifiedPm = activityFact.bestCandidate.pm25 !== null ? `${activityFact.bestCandidate.pm25.toFixed(0)} µg/m³` : "unmeasured";
         
         // Strip any model-invented clock times or measurements from the action
-        // and strictly render from application ground truth
+        // and strictly render from application verified facts
         const sanitizedAction = `Conduct ${activityFact.title} at ${verifiedTime} (lower forecast PM₂.₅: ${verifiedPm})`;
         
         sanitizedItems.push({
@@ -95,10 +102,21 @@ export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts)
   }
 
   return {
-    summary: result.data.summary,
-    items: sanitizedItems,
-    cautionNotes: result.data.cautionNotes,
+    success: true,
+    narrative: {
+      summary: result.data.summary,
+      items: sanitizedItems,
+      cautionNotes: result.data.cautionNotes,
+    },
   };
+}
+
+/**
+ * Backward compatible wrapper returning PlanNarrative | null
+ */
+export function validateAndSanitizePlanNarrative(raw: unknown, facts: PlanFacts): PlanNarrative | null {
+  const res = validatePlanNarrative(raw, facts);
+  return res.success ? res.narrative : null;
 }
 
 /**
@@ -129,7 +147,7 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
       id: "routine-default",
       category: "routine",
       action: "Review the forecast or widen your activity window",
-      whyItHelps: "No eligible activity time was found in the current plan.",
+      whyItHelps: "No eligible activity time was found in the current schedule window.",
       beneficiary: "All household members",
       impactType: "lower_exposure",
     });
@@ -154,7 +172,7 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
       category: "transport",
       action: `Opt for ${facts.transportComparison.suggestedMode}`,
       whyItHelps: facts.transportComparison.explanation,
-      beneficiary: "Local airshed and commuter",
+      beneficiary: "Commuters and local neighborhood",
       impactType: facts.transportComparison.impactType === "lower_exposure" ? "lower_exposure" : "lower_emissions",
     });
   } else {
@@ -163,7 +181,7 @@ export function buildDeterministicNarrative(input: PlanInput, facts: PlanFacts):
       category: "transport",
       action: "Choose metro rail or electric transit over private combustion vehicles where available",
       whyItHelps: "Quantitative emission savings are unavailable without trip distance. Shifting to shared transit eliminates individual tailpipe emissions.",
-      beneficiary: "Community airshed",
+      beneficiary: "Local community",
       impactType: "lower_emissions",
     });
   }
@@ -220,8 +238,13 @@ export async function generatePlan(
     };
   }
 
+  const validFactIds = [
+    ...facts.activities.map((a) => a.id),
+    ...facts.fixedCommitments.map((f) => f.id),
+  ];
+
   const prompt = `You are an expert urban environmental health planner.
-Based ONLY on the verified factual inputs below, generate a grounded, structured plan narrative for the household.
+Based ONLY on the verified factual inputs below, generate a clear, practical plan narrative for the household.
 
 Facts:
 ${JSON.stringify(facts, null, 2)}
@@ -232,27 +255,14 @@ ${JSON.stringify(input, null, 2)}
 Strict requirements:
 1. You MUST include recommendations in ALL FOUR categories: "routine", "indoor", "transport", and "direct_impact".
 2. DO NOT invent times, dates, pollutant numbers, or emissions savings not present in Facts.
-A percentage change in PM₂.₅ compares regional forecast concentrations at two start times. Do not convert it into personal exposure, dose or health outcomes. Leave unscheduled activities unscheduled.
-3. Every recommendation MUST clearly state the action, why it helps, who benefits, and distinguish lowering personal exposure from lowering vehicle/community emissions.
-4. If an evidenceFactId is provided, it must match one of the activity or commitment IDs from facts: ${JSON.stringify(
-    [...facts.activities.map((a) => a.id), ...facts.fixedCommitments.map((f) => f.id)]
-  )}.
-5. Return JSON matching:
-{
-  "summary": "...",
-  "items": [
-    {
-      "id": "...",
-      "category": "routine" | "indoor" | "transport" | "direct_impact",
-      "action": "...",
-      "whyItHelps": "...",
-      "beneficiary": "...",
-      "impactType": "lower_exposure" | "lower_emissions" | "health_protection",
-      "evidenceFactId": "..."
-    }
-  ],
-  "cautionNotes": ["..."]
-}`;
+A percentage difference describes lower forecast PM₂.₅ concentration at the selected start time compared to baseline. Do not convert it into personal exposure dose or clinical outcomes. Leave unscheduled activities unscheduled.
+3. Every recommendation MUST clearly state:
+   - What the person can do (action)
+   - Why it helps (whyItHelps)
+   - Who benefits (beneficiary)
+   - Impact type distinguishing lower_exposure, lower_emissions, or health_protection
+4. If an evidenceFactId is provided, it must strictly match one of the following valid fact IDs: ${JSON.stringify(validFactIds)}.
+5. Return JSON matching the schema.`;
 
   const modelsToTry = [modelName];
   if (modelName !== "gemini-3-flash-preview") {
@@ -275,6 +285,41 @@ A percentage change in PM₂.₅ compares regional forecast concentrations at tw
             generationConfig: {
               responseMimeType: "application/json",
               temperature: 0.2,
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  summary: { type: "STRING" },
+                  items: {
+                    type: "ARRAY",
+                    items: {
+                      type: "OBJECT",
+                      properties: {
+                        id: { type: "STRING" },
+                        category: {
+                          type: "STRING",
+                          enum: ["routine", "indoor", "transport", "direct_impact"],
+                        },
+                        action: { type: "STRING" },
+                        whyItHelps: { type: "STRING" },
+                        beneficiary: { type: "STRING" },
+                        impactType: {
+                          type: "STRING",
+                          enum: ["lower_exposure", "lower_emissions", "health_protection"],
+                        },
+                        evidenceFactId: {
+                          type: "STRING",
+                        },
+                      },
+                      required: ["id", "category", "action", "whyItHelps", "beneficiary", "impactType"],
+                    },
+                  },
+                  cautionNotes: {
+                    type: "ARRAY",
+                    items: { type: "STRING" },
+                  },
+                },
+                required: ["summary", "items"],
+              },
             },
           }),
         },
@@ -289,10 +334,10 @@ A percentage change in PM₂.₅ compares regional forecast concentrations at tw
           break;
         }
       } else {
-        console.warn(`Gemini API call returned status: ${res.status} for model ${currentModel}`);
+        console.warn(`Gemini API call returned status: ${res.status}`);
       }
     } catch {
-      console.warn(`Gemini request failed for model ${currentModel}`);
+      console.warn("Gemini request failed to complete");
     }
   }
 
@@ -318,23 +363,24 @@ A percentage change in PM₂.₅ compares regional forecast concentrations at tw
       };
     }
 
-    const validated = validateAndSanitizePlanNarrative(parsedJson, facts);
-    if (!validated) {
+    const valResult = validatePlanNarrative(parsedJson, facts);
+    if (!valResult.success) {
+      console.warn(`Plan validation fallback triggered: ${valResult.reason}`);
       return {
         status: "deterministic_fallback",
         modelUsed: null,
         narrative: buildDeterministicNarrative(input, facts),
-        fallbackReason: "invalid_fact_id",
+        fallbackReason: valResult.reason,
       };
     }
 
     return {
       status: "gemini_generated",
       modelUsed: successfulModel,
-      narrative: validated,
+      narrative: valResult.narrative,
     };
   } catch (error) {
-    console.warn("Gemini generation failed, falling back to deterministic facts:", error);
+    console.warn("Gemini parsing error occurred");
     return {
       status: "deterministic_fallback",
       modelUsed: null,

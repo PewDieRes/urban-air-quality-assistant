@@ -223,8 +223,8 @@ export function ImmersiveCityView({
           <div className="flex flex-col">
             <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
               <span>{placeLabel}</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-sky-400 border border-slate-700">
-                3D Scene
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-400 border border-slate-700">
+                3D Scene · Illustrative city view
               </span>
             </span>
           </div>

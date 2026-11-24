@@ -501,13 +501,13 @@ export function AirQualityMap({
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pointer-events-auto pr-12 md:pr-0">
           {/* Active Fires Toggle */}
           <button
             type="button"
             onClick={() => setShowFires(!showFires)}
             aria-label="Toggle NASA FIRMS active fire detections"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border backdrop-blur transition shadow-md ${
+            className={`flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border backdrop-blur transition shadow-sm ${
               showFires
                 ? "bg-amber-600/90 text-white border-amber-500 shadow-amber-950"
                 : "bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-slate-800"
@@ -522,35 +522,35 @@ export function AirQualityMap({
             type="button"
             onClick={() => setShowHistoricalSmoke(!showHistoricalSmoke)}
             aria-label="Toggle historical smoke case"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border backdrop-blur transition shadow-md ${
+            className={`flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border backdrop-blur transition shadow-sm ${
               showHistoricalSmoke
                 ? "bg-sky-600/90 text-white border-sky-400 shadow-sky-950"
                 : "bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-slate-800"
             }`}
           >
             <Wind className="w-3.5 h-3.5 text-sky-300" />
-            <span>Historical Smoke Case</span>
+            <span>Historical Smoke</span>
           </button>
 
           <button
             type="button"
             onClick={toggle3D}
             aria-label={is3D ? "Switch to 2D flat view" : "Switch to 3D perspective with extruded buildings"}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border backdrop-blur transition shadow-md ${
+            className={`flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border backdrop-blur transition shadow-sm ${
               is3D
                 ? "bg-emerald-600 text-white border-emerald-500 shadow-emerald-950"
                 : "bg-slate-900/90 text-slate-200 border-slate-700 hover:bg-slate-800"
             }`}
           >
             <Box className="w-3.5 h-3.5" />
-            <span>{is3D ? "2D Flat View" : "3D Perspective / Buildings"}</span>
+            <span>{is3D ? "2D Flat View" : "3D Buildings"}</span>
           </button>
 
           {onOpenPlan && (
             <button
               type="button"
               onClick={onOpenPlan}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/30 backdrop-blur shadow-md transition"
+              className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/30 backdrop-blur shadow-sm transition"
             >
               <span>Build my smog plan</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
@@ -649,34 +649,48 @@ export function AirQualityMap({
             </div>
           )}
 
-          {/* Consistent AQI Legend */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
-            <span className="text-slate-400 font-medium">US AQI Legend:</span>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
-                Good (0-50)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded bg-yellow-500 inline-block" />
-                Moderate (51-100)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded bg-orange-500 inline-block" />
-                Sensitive (101-150)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded bg-rose-500 inline-block" />
-                Unhealthy (151-200)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded bg-purple-500 inline-block" />
-                Very Unhealthy (201-300)
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded bg-red-950 border border-red-500 inline-block" />
-                Hazardous (301+)
-              </span>
+          {/* PM2.5 and AQI Legends */}
+          <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/80 text-[11px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-slate-300 font-medium">PM₂.₅ Pollution Overlay Scale (µg/m³):</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
+                  0–12 (Good)
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <span className="w-3 h-3 rounded bg-yellow-500 inline-block" />
+                  12–35 (Moderate)
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <span className="w-3 h-3 rounded bg-orange-500 inline-block" />
+                  35–55 (Sensitive)
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <span className="w-3 h-3 rounded bg-rose-500 inline-block" />
+                  55–150 (Unhealthy)
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <span className="w-3 h-3 rounded bg-purple-500 inline-block" />
+                  150–250 (Very Unhealthy)
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <span className="w-3 h-3 rounded bg-red-950 border border-red-500 inline-block" />
+                  250+ (Hazardous)
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400 border-t border-slate-800/50 pt-1">
+              <span className="text-slate-500 font-medium">US AQI Reference Scale:</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span>0-50</span>
+                <span>51-100</span>
+                <span>101-150</span>
+                <span>151-200</span>
+                <span>201-300</span>
+                <span>301+</span>
+              </div>
             </div>
           </div>
         </div>
