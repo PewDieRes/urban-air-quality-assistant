@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { fetchWithTimeout } from "@/lib/security/fetch-with-timeout";
+import {
+  formatSafeErrorMessage,
+  normalizeServiceUrl,
+  readSafeJsonResponse,
+} from "@/lib/security/http-validation";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +48,7 @@ export async function POST(request: NextRequest) {
 
     const { fireId, lat, lon, observedAt } = parseResult.data;
 
-    const serviceUrl = process.env.SMOKE_SERVICE_URL;
+    const serviceUrl = normalizeServiceUrl(process.env.SMOKE_SERVICE_URL);
     const serviceToken = process.env.SMOKE_SERVICE_TOKEN;
 
     // If live service is not configured, gracefully indicate unavailable status so client uses verified historical case
@@ -73,10 +78,22 @@ export async function POST(request: NextRequest) {
       8000
     );
 
-    const data = await proxyRes.json();
-    return NextResponse.json(data, { status: proxyRes.status });
-  } catch (error) {
-    console.error("Smoke job route error:", error);
+    const parsedBody = await readSafeJsonResponse(proxyRes);
+    if (!parsedBody.ok || proxyRes.status >= 500) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "RUNNER_UNAVAILABLE",
+            message: "Live atmospheric model service is offline or unreachable.",
+          },
+        },
+        { status: 503 }
+      );
+    }
+
+    return NextResponse.json(parsedBody.data, { status: proxyRes.status });
+  } catch (error: unknown) {
+    console.error("Smoke job route error:", formatSafeErrorMessage(error));
     return NextResponse.json(
       {
         error: {

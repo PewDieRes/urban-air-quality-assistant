@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listFires } from "@/lib/fires/firms";
-import { Bounds } from "@/lib/map/regional-cells";
+import { validateBoundingBoxParams } from "@/lib/security/http-validation";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -11,38 +11,16 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const westStr = searchParams.get("west");
-    const southStr = searchParams.get("south");
-    const eastStr = searchParams.get("east");
-    const northStr = searchParams.get("north");
-
-    if (!westStr || !southStr || !eastStr || !northStr) {
-      return NextResponse.json(
-        { error: { code: "INVALID_REQUEST", message: "west, south, east, and north bounds are required" } },
-        { status: 400 }
-      );
+    const boundsResult = validateBoundingBoxParams(
+      searchParams,
+      "west, south, east, and north bounds are required",
+      "Bounding box coordinates must be finite numbers"
+    );
+    if (!boundsResult.ok) {
+      return boundsResult.response;
     }
 
-    const bounds: Bounds = {
-      west: parseFloat(westStr),
-      south: parseFloat(southStr),
-      east: parseFloat(eastStr),
-      north: parseFloat(northStr),
-    };
-
-    if (
-      isNaN(bounds.west) ||
-      isNaN(bounds.south) ||
-      isNaN(bounds.east) ||
-      isNaN(bounds.north)
-    ) {
-      return NextResponse.json(
-        { error: { code: "INVALID_COORDINATES", message: "Bounding box coordinates must be numbers" } },
-        { status: 400 }
-      );
-    }
-
-    const fires = await listFires(bounds);
+    const fires = await listFires(boundsResult.data);
     return NextResponse.json({ fires });
   } catch {
     console.error("Fire data request failed");

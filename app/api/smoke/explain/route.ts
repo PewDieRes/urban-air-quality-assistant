@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { formatSmokeExplanation, SmokeExplanationRequest } from "@/lib/smoke/explain";
+import { formatSafeErrorMessage } from "@/lib/security/http-validation";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { formatSmokeExplanation, SmokeExplanationRequest } from "@/lib/smoke/explain";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +48,8 @@ export async function POST(request: NextRequest) {
 
     const explanation = formatSmokeExplanation(req);
     return NextResponse.json({ explanation });
-  } catch (error) {
-    console.error("Smoke explain error:", error);
+  } catch (error: unknown) {
+    console.error("Smoke explain error:", formatSafeErrorMessage(error));
     return NextResponse.json(
       { error: { code: "SERVER_ERROR", message: "Failed to generate smoke explanation" } },
       { status: 500 }

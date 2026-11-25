@@ -66,7 +66,7 @@ export async function searchLocations(query: string, limit = 8): Promise<Place[]
     trimmed
   )}&count=${boundedLimit}&language=en&format=json`;
 
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, 5000);
   if (!res.ok) {
     throw new Error(`Geocoding service returned status ${res.status}`);
   }
