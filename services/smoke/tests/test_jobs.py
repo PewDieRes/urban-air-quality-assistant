@@ -33,3 +33,28 @@ def test_duplicate_requests_share_job_and_timeout_is_unavailable():
     status_data = status_res.json()
     assert status_data["id"] == job_id1
     assert status_data["state"] in ["queued", "running", "complete", "unavailable"]
+
+
+def test_job_cache_evicts_oldest_entry_when_bounded():
+    app = create_app(max_jobs=2)
+    client = TestClient(app)
+
+    job_ids = []
+    for index in range(3):
+        response = client.post(
+            "/jobs",
+            json={
+                "fireId": f"firms-test-{index}",
+                "lat": 30.25 + index * 0.1,
+                "lon": 75.85,
+                "observedAt": f"2026-11-18T0{index + 1}:00:00Z",
+            },
+        )
+        assert response.status_code == 200
+        job_ids.append(response.json()["id"])
+
+    # Oldest entry should be evicted once cache capacity (2) is exceeded
+    assert client.get(f"/jobs/{job_ids[0]}").status_code == 404
+    assert client.get(f"/jobs/{job_ids[1]}").status_code == 200
+    assert client.get(f"/jobs/{job_ids[2]}").status_code == 200
+    assert client.get("/jobs/bad..id").status_code == 400

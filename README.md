@@ -11,6 +11,42 @@
 
 ---
 
+## Chosen Vertical & Target Persona
+
+- **Chosen Vertical:** Urban Environmental Health & Daily Household Mobility Planning (Smog Episode Resilience).
+- **Target Persona:** Urban families and vulnerable households (children, older adults, and individuals with asthma or cardiopulmonary sensitivities) who must keep immovable daily commitments such as school pickups while minimizing outdoor PM₂.₅ exposure during flexible errands, strengthening indoor air protection within budget, and choosing realistic lower-emission transport modes.
+
+---
+
+## Approach and Logic
+
+The assistant separates **deterministic factual calculation** from **language generation** so an LLM never invents schedules, PM₂.₅ concentrations, or emissions savings:
+
+1. **Constraint-First Activity Scheduling:** Fixed commitments (e.g., school pickup) are locked first. Every hourly candidate slot inside the flexible errand window is checked for zero conflict and **100% forecast coverage across the full duration**.
+2. **Duration-Weighted Exposure Ranking:** Rather than sorting by start-hour readings alone, each eligible slot is scored using the **time-weighted mean forecast PM₂.₅** across overlapping hourly intervals (for instance, a 90-minute trip starting on the hour weights 60 minutes from hour `H` and 30 minutes from hour `H+1`), breaking exact ties by earliest start time.
+3. **Quantified Emissions Only When Defensible:** Transport emissions reductions (`kg CO₂e`) are calculated strictly when trip distance and verified parameters (public transit availability, carpool occupancy `>= 2`, or explicit avoided vehicle-km) are present, using published UK DESNZ / DEFRA 2024 factors. Otherwise, numeric savings are omitted and missing inputs are disclosed cleanly.
+4. **Grounded Gemini Narrative with Deterministic Fallback:** Gemini receives structured JSON facts and is constrained by Zod schema verification, category-specific `evidenceFactId` rules, regex claim checks, and purifier/mode availability guards. Any timeout, HTTP error, or ungrounded claim falls back transparently to deterministic verified guidance (`Forecast-based plan`).
+
+---
+
+## How the Solution Works
+
+1. **Worldwide Location & Hourly Forecast:** City search, geolocation, or preset demos (`Delhi-NCR`, `Tokyo Demo`) fetch 24-hour regional hourly PM₂.₅ and US AQI forecasts from Open-Meteo and display them in the selected city's local timezone with stale-response guards.
+2. **Household Schedule Evaluation (`/api/plan`):** Computes deterministic facts (`computePlanFacts`) and requests structured narrative explanations from Google Gemini (`generatePlan`, defaulting to `gemini-3.5-flash-lite` with one retry to `gemini-flash-lite-latest`), returning verified numbers, badges (`Explained by Gemini` or `Forecast-based plan`), indoor tips matched to HEPA availability/budget, and transport trade-offs.
+3. **Regional Map, Active Fires & Smoke Trajectory Context:** An interactive MapLibre GL JS 2D view displays a 3×3 US AQI grid across a 24-hour scrubber, overlays NASA FIRMS active fires (`/api/fires`), offers a procedural illustrative 3D city haze viewer, and surfaces the verified November 3, 2024 historical HYSPLIT trajectory case (`public/smoke/historical.geojson`) labeled as **Possible smoke paths**.
+
+---
+
+## Assumptions Made
+
+- **Forecast Coverage & Time-Step Granularity:** Open-Meteo provides hourly forecast intervals; candidate activities require complete coverage across the full duration, and sub-hour variations are not interpolated beyond hourly block weights.
+- **Outdoor Concentration vs. Personal Dose:** Percent reductions compare ambient outdoor forecast PM₂.₅ concentration across candidate hours; true personal inhaled dose depends on unmeasured breathing rates, cabin filters, and indoor infiltration.
+- **Geographic Transferability of Emissions Factors:** CO₂e estimates rely on **UK DESNZ / DEFRA (2024)** reference factors (`0.16725 kg CO₂e/vehicle-km` passenger car vs. `0.03549 kg CO₂e/passenger-km` national rail / `0.10215 kg CO₂e/passenger-km` local bus) and flag `isOutsideReferenceGeography` outside the UK since local electricity grids and vehicle fleets differ.
+- **Single-Household Scope:** Shifting one family errand reduces household emissions and exposure but does not measurably alter citywide AQI.
+- **Smoke Trajectory & 3D Rendering Fallbacks:** Because multi-gigabyte NOAA ARL weather cycles (`800 MB–2.2 GB`) exceed free serverless limits, hosted deployments gracefully fall back to the documented historical Nov 3, 2024 smoke case unless `SMOKE_SERVICE_URL` points to an external runner. With `NEXT_PUBLIC_GOOGLE_MAPS_TILE_KEY` unset, the 3D scene renders an illustrative procedural skyline with zero GCP billing.
+
+---
+
 ## Key Features
 
 1. **Worldwide Air Quality Forecasting & Disambiguation**

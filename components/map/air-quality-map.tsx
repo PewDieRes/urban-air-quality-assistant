@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Bounds, RegionalCell, getCellValueAtInstant } from "@/lib/map/regional-cells";
-import { Forecast, AirSample, getAqiCategory } from "@/lib/forecast/types";
+import { Forecast, AirSample, getAqiCategory, getAqiMapFillColor } from "@/lib/forecast/types";
 import { formatHourlyTime } from "@/lib/forecast/open-meteo";
 import { SmokePathSet } from "@/lib/smoke/types";
 import {
@@ -287,16 +287,7 @@ export function AirQualityMap({
 
       const aqi = sample?.usAqi ?? null;
       const pm25 = sample?.pm25 ?? null;
-
-      let color = "rgba(100, 116, 139, 0.25)";
-      if (aqi !== null) {
-        if (aqi <= 50) color = "rgba(16, 185, 129, 0.4)";
-        else if (aqi <= 100) color = "rgba(234, 179, 8, 0.4)";
-        else if (aqi <= 150) color = "rgba(249, 115, 22, 0.45)";
-        else if (aqi <= 200) color = "rgba(244, 63, 94, 0.5)";
-        else if (aqi <= 300) color = "rgba(168, 85, 247, 0.55)";
-        else color = "rgba(136, 19, 55, 0.65)";
-      }
+      const color = getAqiMapFillColor(aqi);
 
       return {
         type: "Feature",
