@@ -74,6 +74,38 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
         });
       }
     );
+
+    await page.route(
+      (url) => url.pathname === "/api/locations",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            places: [
+              {
+                id: "delhi-search-1",
+                name: "Old Delhi",
+                region: "Delhi",
+                country: "India",
+                lat: 28.65,
+                lon: 77.23,
+                timeZone: "Asia/Kolkata",
+              },
+              {
+                id: "new-delhi-search-2",
+                name: "New Delhi",
+                region: "Delhi",
+                country: "India",
+                lat: 28.61,
+                lon: 77.21,
+                timeZone: "Asia/Kolkata",
+              },
+            ],
+          }),
+        });
+      }
+    );
   });
 
   for (const vp of [
@@ -83,8 +115,22 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
     test(`keyboard-only flow, sticky header clearance, live regions, unique SVG IDs, and axe audit on ${vp.name} (${vp.width}x${vp.height})`, async ({
       page,
     }) => {
+      const cspViolations: string[] = [];
+      page.on("console", (msg) => {
+        if (msg.type() === "error" && /content security policy|csp/i.test(msg.text())) {
+          cspViolations.push(msg.text());
+        }
+      });
+
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto("/");
+      const navResponse = await page.goto("/");
+      expect(navResponse).not.toBeNull();
+      const responseHeaders = navResponse!.headers();
+      expect(responseHeaders["x-content-type-options"]).toBe("nosniff");
+      expect(responseHeaders["x-frame-options"]).toBe("DENY");
+      expect(responseHeaders["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+      expect(responseHeaders["permissions-policy"]).toContain("geolocation=(self)");
+      expect(responseHeaders["content-security-policy"]).toContain("default-src 'self'");
 
       await expect(page.getByTestId("current-pm25-value")).toBeVisible({ timeout: 10000 });
 
@@ -112,6 +158,26 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       });
       expect(initialAxe.violations, JSON.stringify(initialAxe.violations, null, 2)).toEqual([]);
 
+      // 2.5 Audit open LocationPicker ARIA combobox dropdown & keyboard selection
+      const locationCombobox = page.getByRole("combobox", { name: /search city or location/i });
+      await locationCombobox.fill("Delhi");
+      const matchingListbox = page.getByRole("listbox", { name: /matching cities/i });
+      await expect(matchingListbox).toBeVisible();
+      await expect(locationCombobox).toHaveAttribute("aria-expanded", "true");
+      await page.keyboard.press("ArrowDown");
+      await expect(matchingListbox.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+
+      const comboboxOpenAxe = await page.evaluate(async () => {
+        // @ts-expect-error axe injected on window
+        return await window.axe.run(document, {
+          runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+        });
+      });
+      expect(comboboxOpenAxe.violations, JSON.stringify(comboboxOpenAxe.violations, null, 2)).toEqual([]);
+
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("selected-location-name")).toHaveText("Old Delhi");
+
       // 3. Keyboard-only: select Tokyo Demo button via Tab + Enter
       const tokyoBtn = page.getByRole("button", { name: "Tokyo Demo" });
       await tokyoBtn.focus();
@@ -135,7 +201,26 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       const findTimeBtn = planner.getByRole("button", { name: "Find a time", exact: true });
       await expect(findTimeBtn).toBeVisible();
 
-      // 6. Keyboard-only validation error test: clear Activity end -> enter start after end -> verify alert announcement + clearance
+      // 6. Expand optional household, budget & transport settings and audit open disclosure panel
+      const optionalSettingsSummary = planner.locator("summary", {
+        hasText: "Optional household, budget & transport settings",
+      });
+      await optionalSettingsSummary.focus();
+      await page.keyboard.press("Enter");
+      await expect(planner.getByLabel("Primary Travel Mode")).toBeVisible();
+
+      const expandedSettingsAxe = await page.evaluate(async () => {
+        // @ts-expect-error axe injected on window
+        return await window.axe.run(document, {
+          runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+        });
+      });
+      expect(
+        expandedSettingsAxe.violations,
+        JSON.stringify(expandedSettingsAxe.violations, null, 2)
+      ).toEqual([]);
+
+      // 7. Keyboard-only validation error test: clear Activity end -> enter start after end -> verify alert announcement + clearance
       const commStart = planner.getByLabel("Commitment start", { exact: true });
       const commEnd = planner.getByLabel("Commitment end", { exact: true });
       const actStart = planner.getByLabel("Activity start", { exact: true });
@@ -224,6 +309,46 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
         });
       });
       expect(resultAxe.violations, JSON.stringify(resultAxe.violations, null, 2)).toEqual([]);
+
+      // 12. Open Immersive 3D City view: audit fallback modal dialog, Escape close + focus return, and illustrative 3D view
+      const immersiveBtn = page.getByRole("button", { name: /immersive 3d city/i });
+      await immersiveBtn.focus();
+      await page.keyboard.press("Enter");
+
+      const fallbackDialog = page.getByRole("dialog");
+      await expect(fallbackDialog).toBeVisible({ timeout: 15000 });
+      const modalAxe = await page.evaluate(async () => {
+        // @ts-expect-error axe injected on window
+        return await window.axe.run(document, {
+          runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+        });
+      });
+      expect(modalAxe.violations, JSON.stringify(modalAxe.violations, null, 2)).toEqual([]);
+
+      // Verify Escape dismisses immersive fallback dialog and returns focus to Immersive 3D toggle
+      await page.keyboard.press("Escape");
+      await expect(fallbackDialog).not.toBeVisible();
+      await expect(immersiveBtn).toBeFocused();
+
+      // Re-open Immersive 3D, enter illustrative city mode, and audit expanded 3D view
+      await page.keyboard.press("Enter");
+      await expect(fallbackDialog).toBeVisible({ timeout: 10000 });
+      await page.getByRole("button", { name: /explore illustrative city/i }).click();
+      await expect(page.getByRole("checkbox", { name: /illustration of forecast pollution/i })).toBeVisible({
+        timeout: 10000,
+      });
+
+      const illustrativeAxe = await page.evaluate(async () => {
+        // @ts-expect-error axe injected on window
+        return await window.axe.run(document, {
+          runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+        });
+      });
+      expect(
+        illustrativeAxe.violations,
+        JSON.stringify(illustrativeAxe.violations, null, 2)
+      ).toEqual([]);
+      expect(cspViolations, `CSP violations: ${cspViolations.join("; ")}`).toEqual([]);
     });
   }
 });

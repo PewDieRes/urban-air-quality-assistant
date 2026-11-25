@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useId, useRef } from "react";
 import { Loader2, MapPin, Navigation, Search } from "lucide-react";
 import { DEFAULT_PLACE, Place, TOKYO_PLACE } from "@/lib/location/search";
 import { useLocationPicker } from "@/hooks/use-location-picker";
@@ -21,6 +21,7 @@ export function LocationPicker({
   onSelectLocation,
 }: LocationPickerProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
   const picker = useLocationPicker({ onSelectLocation, dropdownRef });
 
   const displayTitle = selectedPlace ? selectedPlace.name : "Custom coordinates";
@@ -55,10 +56,11 @@ export function LocationPicker({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
+              aria-pressed={isDelhi}
               onClick={() =>
                 onSelectLocation(DEFAULT_PLACE, { lat: DEFAULT_PLACE.lat, lon: DEFAULT_PLACE.lon })
               }
-              className={`px-2.5 py-1 rounded text-xs font-medium transition ${
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-shadow ${
                 isDelhi
                   ? "bg-teal-700 text-white shadow-xs"
                   : "bg-stone-50 hover:bg-stone-100 text-stone-700 border border-stone-200"
@@ -68,10 +70,11 @@ export function LocationPicker({
             </button>
             <button
               type="button"
+              aria-pressed={isTokyo}
               onClick={() =>
                 onSelectLocation(TOKYO_PLACE, { lat: TOKYO_PLACE.lat, lon: TOKYO_PLACE.lon })
               }
-              className={`px-2.5 py-1 rounded text-xs font-medium transition ${
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-shadow ${
                 isTokyo
                   ? "bg-teal-700 text-white shadow-xs"
                   : "bg-stone-50 hover:bg-stone-100 text-stone-700 border border-stone-200"
@@ -127,11 +130,20 @@ export function LocationPicker({
           <input
             id="location-search-input"
             type="text"
-            role="textbox"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={picker.isOpen && picker.results.length > 0}
+            aria-controls={picker.isOpen && picker.results.length > 0 ? listboxId : undefined}
+            aria-activedescendant={
+              picker.isOpen && picker.activeIndex >= 0
+                ? `${listboxId}-option-${picker.activeIndex}`
+                : undefined
+            }
             aria-label="Search city or location"
             placeholder="Search city (e.g. Delhi, Tokyo, London)..."
             value={picker.query}
             onChange={(event) => picker.handleQueryChange(event.target.value)}
+            onKeyDown={picker.handleKeyDown}
             onFocus={() => {
               if (picker.results.length > 0) picker.setIsOpen(true);
             }}
@@ -144,7 +156,12 @@ export function LocationPicker({
       </div>
 
       {picker.isOpen && (
-        <LocationSuggestionsDropdown results={picker.results} onSelectPlace={picker.selectPlace} />
+        <LocationSuggestionsDropdown
+          listboxId={listboxId}
+          results={picker.results}
+          activeIndex={picker.activeIndex}
+          onSelectPlace={picker.selectPlace}
+        />
       )}
     </div>
   );

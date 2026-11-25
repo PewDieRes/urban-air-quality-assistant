@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Map, Box, Loader2 } from "lucide-react";
 import { AirQualityViewProps, MapView } from "@/lib/immersive/types";
@@ -35,6 +35,16 @@ export function AirQualityView({
   onBuildPlan,
 }: AirQualityViewProps) {
   const [viewMode, setViewMode] = useState<MapView>("map");
+  const immersiveTabRef = useRef<HTMLButtonElement>(null);
+
+  const handleBackToMapWithFocus = useCallback(() => {
+    setViewMode("map");
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        immersiveTabRef.current?.focus();
+      });
+    }
+  }, []);
 
   return (
     <div className="flex flex-col bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
@@ -43,6 +53,7 @@ export function AirQualityView({
         <div className="flex items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs">
           <button
             type="button"
+            aria-pressed={viewMode === "map"}
             onClick={() => setViewMode("map")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
               viewMode === "map"
@@ -55,7 +66,9 @@ export function AirQualityView({
           </button>
 
           <button
+            ref={immersiveTabRef}
             type="button"
+            aria-pressed={viewMode === "immersive"}
             onClick={() => setViewMode("immersive")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
               viewMode === "immersive"
@@ -100,7 +113,7 @@ export function AirQualityView({
             forecast={forecast}
             selectedInstant={selectedInstant}
             onSelectCoordinate={onSelectCoordinate}
-            onBackToMap={() => setViewMode("map")}
+            onBackToMap={handleBackToMapWithFocus}
             onBuildPlan={onBuildPlan}
           />
         )}

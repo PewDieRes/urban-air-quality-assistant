@@ -120,10 +120,10 @@ export function HouseholdTransportSettings({ preferences }: HouseholdTransportSe
           </div>
         )}
 
-        <div>
-          <span className="block text-stone-600 mb-1.5 font-medium">
+        <fieldset>
+          <legend className="block text-stone-600 mb-1.5 font-medium">
             Available transport alternatives
-          </span>
+          </legend>
           <div className="flex flex-wrap gap-2 text-xs">
             {ALTERNATIVE_MODE_OPTIONS.map((mode) => (
               <label
@@ -140,7 +140,7 @@ export function HouseholdTransportSettings({ preferences }: HouseholdTransportSe
               </label>
             ))}
           </div>
-        </div>
+        </fieldset>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-stone-100">
           <div className="space-y-1.5">

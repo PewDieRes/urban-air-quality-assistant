@@ -14,6 +14,7 @@ export function useLocationPicker({ onSelectLocation, dropdownRef }: UseLocation
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Place[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
   const [geoNotice, setGeoNotice] = useState<string | null>(null);
@@ -56,12 +57,14 @@ export function useLocationPicker({ onSelectLocation, dropdownRef }: UseLocation
 
       if (requestId === activeRequestIdRef.current) {
         setResults(payload.places || []);
+        setActiveIndex(-1);
         setIsOpen(true);
       }
     } catch (searchError: unknown) {
       console.warn("City search failed:", searchError);
       if (requestId === activeRequestIdRef.current) {
         setResults([]);
+        setActiveIndex(-1);
       }
     } finally {
       if (requestId === activeRequestIdRef.current) {
@@ -85,8 +88,51 @@ export function useLocationPicker({ onSelectLocation, dropdownRef }: UseLocation
     setQuery("");
     setResults([]);
     setIsOpen(false);
+    setActiveIndex(-1);
     setGeoError(null);
     setGeoNotice(null);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      if (isOpen) {
+        event.preventDefault();
+      }
+      setIsOpen(false);
+      setActiveIndex(-1);
+      return;
+    }
+
+    if (results.length === 0) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setActiveIndex(0);
+      } else {
+        setActiveIndex((prev) => (prev + 1) % results.length);
+      }
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setActiveIndex(results.length - 1);
+      } else {
+        setActiveIndex((prev) => (prev <= 0 ? results.length - 1 : prev - 1));
+      }
+      return;
+    }
+
+    if (event.key === "Enter" && isOpen && activeIndex >= 0 && results[activeIndex]) {
+      event.preventDefault();
+      selectPlace(results[activeIndex]);
+    }
   };
 
   const fallbackToIpDetection = useCallback(async (): Promise<boolean> => {
@@ -202,12 +248,14 @@ export function useLocationPicker({ onSelectLocation, dropdownRef }: UseLocation
     results,
     isOpen,
     setIsOpen,
+    activeIndex,
     isLoading,
     geoError,
     setGeoError,
     geoNotice,
     setGeoNotice,
     handleQueryChange,
+    handleKeyDown,
     selectPlace,
     handleUseGeolocation,
   };

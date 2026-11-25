@@ -26,6 +26,7 @@ export function ForecastChart({
 }: ForecastChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const gradientId = useId();
+  const chartHintId = useId();
 
   const hourlySlots: AirSample[] = useMemo(
     () => forecast?.hourly?.slice(0, 24) || [],
@@ -92,6 +93,7 @@ export function ForecastChart({
       className={`bg-white border border-stone-200/90 rounded-xl p-4 shadow-sm flex flex-col gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 ${className}`}
       role="region"
       aria-label="Hourly air quality forecast"
+      aria-describedby={chartHintId}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onMouseLeave={() => setHoveredIndex(null)}
@@ -101,7 +103,7 @@ export function ForecastChart({
           <span className="text-xs uppercase font-semibold tracking-wider text-stone-600">
             24-Hour PM₂.₅ Profile ({timeZone})
           </span>
-          <p className="text-[11px] text-stone-600">
+          <p id={chartHintId} className="text-[11px] text-stone-600">
             Click or use arrow keys to inspect hourly readings. Gaps denote missing data.
           </p>
         </div>

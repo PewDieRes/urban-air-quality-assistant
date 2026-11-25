@@ -128,7 +128,7 @@ test.describe("Urban Air Quality Assistant", () => {
 
     await page.goto("/");
 
-    const searchInput = page.getByRole("textbox", { name: /search city|search location/i });
+    const searchInput = page.getByRole("combobox", { name: /search city|search location/i });
     await expect(searchInput).toBeVisible();
 
     await searchInput.fill("Del");

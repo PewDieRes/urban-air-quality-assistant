@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Building2, Eye, RotateCcw, Sparkles } from "lucide-react";
 import { AirSample } from "@/lib/forecast/types";
 import { HazeStyle, ProviderStatus, SceneMode } from "@/lib/immersive/types";
@@ -99,6 +99,7 @@ export function ImmersiveHeaderBar({
             <button
               key={option.mode}
               type="button"
+              aria-pressed={sceneMode === option.mode}
               onClick={() => onChangeSceneMode(option.mode)}
               className={`px-2.5 py-1 rounded-lg font-medium transition ${
                 sceneMode === option.mode
@@ -145,12 +146,18 @@ export function ImmersiveCameraControls({
   return (
     <div className="absolute top-16 left-3 z-10 flex flex-col gap-1.5 pointer-events-auto">
       <div className="flex flex-col bg-slate-900/90 backdrop-blur border border-slate-700/80 rounded-xl p-1 shadow-lg text-xs">
-        <button type="button" onClick={() => onApplyPreset("home")} className={presetButtonClass("home")}>
+        <button
+          type="button"
+          aria-pressed={activePreset === "home"}
+          onClick={() => onApplyPreset("home")}
+          className={presetButtonClass("home")}
+        >
           <RotateCcw className="w-3.5 h-3.5" />
           <span>Reset View</span>
         </button>
         <button
           type="button"
+          aria-pressed={activePreset === "aerial"}
           onClick={() => onApplyPreset("aerial")}
           className={presetButtonClass("aerial")}
         >
@@ -159,6 +166,7 @@ export function ImmersiveCameraControls({
         </button>
         <button
           type="button"
+          aria-pressed={activePreset === "skyline"}
           onClick={() => onApplyPreset("skyline")}
           className={presetButtonClass("skyline")}
         >
@@ -243,27 +251,48 @@ export function ImmersiveFallbackModal({
   onChooseIllustrative: () => void;
   onBackToMap: () => void;
 }) {
+  const exploreButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    exploreButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onBackToMap();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onBackToMap]);
+
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm pointer-events-auto">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="immersive-fallback-title"
+      aria-describedby="immersive-fallback-desc"
+      className="absolute inset-0 z-20 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm pointer-events-auto"
+    >
       <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col items-center text-center">
         <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-3">
           <Building2 className="w-6 h-6" />
         </div>
-        <h3 className="text-base font-semibold text-slate-100">
+        <h3 id="immersive-fallback-title" className="text-base font-semibold text-slate-100">
           {!providerStatus.hasCredentials
             ? "Real 3D City Imagery Not Active"
             : "Unable to Stream 3D Tiles"}
         </h3>
-        <p className="text-xs text-slate-400 mt-1.5 mb-5 leading-relaxed">
+        <p id="immersive-fallback-desc" className="text-xs text-slate-300 mt-1.5 mb-5 leading-relaxed">
           {!providerStatus.hasCredentials
             ? "Real-city 3D geometry requires a configured 3D tile provider. You can explore the city using our interactive illustrative 3D model, or stay on the 2D regional map."
             : providerStatus.error}
         </p>
         <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full">
           <button
+            ref={exploreButtonRef}
             type="button"
             onClick={onChooseIllustrative}
-            className="w-full sm:flex-1 py-2 px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs transition shadow-md flex items-center justify-center gap-1.5"
+            className="w-full sm:flex-1 py-2 px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs transition shadow-md flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Explore illustrative city</span>
@@ -271,7 +300,7 @@ export function ImmersiveFallbackModal({
           <button
             type="button"
             onClick={onBackToMap}
-            className="w-full sm:flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition flex items-center justify-center gap-1.5"
+            className="w-full sm:flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
           >
             <span>Return to 2D Map</span>
           </button>
