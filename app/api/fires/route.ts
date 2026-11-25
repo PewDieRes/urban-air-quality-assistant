@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     const fires = await listFires(bounds);
     return NextResponse.json({ fires });
-  } catch (error) {
+  } catch {
     console.error("Fire data request failed");
     return NextResponse.json(
       { error: { code: "PROVIDER_FAILURE", message: "Failed to retrieve NASA FIRMS satellite fire detections" } },

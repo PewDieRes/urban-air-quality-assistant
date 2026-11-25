@@ -1,4 +1,4 @@
-import { Bounds, clampLatitude, normalizeLongitude } from "../map/regional-cells";
+import { Bounds } from "../map/regional-cells";
 import { fetchWithTimeout } from "../security/fetch-with-timeout";
 
 export interface FireDetection {

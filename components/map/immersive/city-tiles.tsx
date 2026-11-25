@@ -1,21 +1,22 @@
 "use client";
 
-import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ThreeEvent } from "@react-three/fiber";
-import { TilesRenderer, TilesPlugin, TilesAttributionOverlay } from "3d-tiles-renderer/r3f";
+import { TilesAttributionOverlay, TilesPlugin, TilesRenderer } from "3d-tiles-renderer/r3f";
 import {
-  GoogleCloudAuthPlugin,
   CesiumIonAuthPlugin,
-  QuantizedMeshPlugin,
   GLTFExtensionsPlugin,
+  GoogleCloudAuthPlugin,
+  QuantizedMeshPlugin,
+  ReorientationPlugin,
   TileCompressionPlugin,
   TilesFadePlugin,
   UpdateOnChangePlugin,
-  ReorientationPlugin,
 } from "3d-tiles-renderer/plugins";
-import { CityAnchorPreset, SceneMode, Coordinates, ProviderStatus } from "@/lib/immersive/types";
 import { toGeodetic } from "@/lib/immersive/frame";
+import { CityAnchorPreset, Coordinates, ProviderStatus, SceneMode } from "@/lib/immersive/types";
+import { ProceduralCityBlocks } from "./procedural-city-blocks";
 
 interface CityTilesProps {
   anchor: CityAnchorPreset;
@@ -24,225 +25,134 @@ interface CityTilesProps {
   onProviderStatus?: (status: ProviderStatus) => void;
 }
 
-/**
- * Procedural textured 3D city block layout used when real-city 3D tiles are not configured,
- * or as an offline illustrative city benchmark scene. Provides realistic urban morphology,
- * distinct building heights, street grid, and ground terrain matching the anchor.
- */
-function ProceduralCityBlocks({
-  anchor,
-  onPick,
-}: {
-  anchor: CityAnchorPreset;
-  onPick?: (point: THREE.Vector3) => void;
-}) {
-  const isTokyo = anchor.id.includes("tokyo");
-
-  const buildings = useMemo(() => {
-    const list: Array<{
-      id: string;
-      position: [number, number, number];
-      size: [number, number, number];
-      color: string;
-      roofColor: string;
-      name: string;
-    }> = [];
-
-    // Seeded pseudo-random generator for consistent city layout
-    let seed = isTokyo ? 1397671 : 772090;
-    const random = () => {
-      seed = (seed * 9301 + 49297) % 233280;
-      return seed / 233280;
-    };
-
-    // Central landmark (Tokyo Station / Connaught Place)
-    list.push({
-      id: "landmark-center",
-      position: [0, 18, 0],
-      size: [110, 36, 160],
-      color: isTokyo ? "#8b2500" : "#d97706", // red brick Tokyo Station or sandstone Delhi
-      roofColor: "#334155",
-      name: isTokyo ? "Tokyo Station Marunouchi" : "Connaught Central Arcade",
-    });
-
-    // Create a 7x7 city block grid around the anchor (~1.6km x 1.6km)
-    const gridSize = 4;
-    const blockSpacing = 160;
-
-    for (let gx = -gridSize; gx <= gridSize; gx++) {
-      for (let gz = -gridSize; gz <= gridSize; gz++) {
-        if (gx === 0 && gz === 0) continue; // skip center landmark
-
-        const blockX = gx * blockSpacing;
-        const blockZ = gz * blockSpacing;
-
-        // 2-3 buildings per street block
-        const count = 1 + Math.floor(random() * 3);
-        for (let b = 0; b < count; b++) {
-          const offsetX = (random() - 0.5) * 80;
-          const offsetZ = (random() - 0.5) * 80;
-
-          // Height distribution: towers near center (up to 240m), lower at perimeter
-          const distFromCenter = Math.hypot(gx, gz);
-          const heightScale = Math.max(0.3, 1.0 - distFromCenter / (gridSize * 1.5));
-          const height = Math.floor(35 + random() * 180 * heightScale);
-
-          const width = 30 + Math.floor(random() * 40);
-          const depth = 30 + Math.floor(random() * 40);
-
-          // Glass, steel, or stone facade shades
-          const hues = isTokyo
-            ? ["#1e293b", "#334155", "#475569", "#64748b", "#0f172a"]
-            : ["#78350f", "#92400e", "#b45309", "#d97706", "#451a03"];
-          const color = hues[Math.floor(random() * hues.length)];
-
-          list.push({
-            id: `bld-${gx}-${gz}-${b}`,
-            position: [blockX + offsetX, height / 2, blockZ + offsetZ],
-            size: [width, height, depth],
-            color,
-            roofColor: "#1e293b",
-            name: `${isTokyo ? "Marunouchi Tower" : "Barakhamba Complex"} #${gx + 5}-${gz + 5}`,
-          });
-        }
-      }
-    }
-
-    return list;
-  }, [isTokyo]);
-
-  return (
-    <group name="procedural-city-blocks">
-      {/* Ground Terrain Plane with street grid lines */}
-      <mesh
-        position={[0, 0, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
-        onClick={(e) => {
-          e.stopPropagation();
-          onPick?.(e.point);
-        }}
-      >
-        <planeGeometry args={[4000, 4000]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.8} />
-      </mesh>
-
-      {/* Grid road markings */}
-      <gridHelper args={[4000, 50, "#334155", "#1e293b"]} position={[0, 0.2, 0]} />
-
-      {/* 3D Buildings */}
-      {buildings.map((b) => (
-        <group key={b.id} position={b.position}>
-          <mesh
-            castShadow
-            receiveShadow
-            onClick={(e) => {
-              e.stopPropagation();
-              onPick?.(e.point);
-            }}
-          >
-            <boxGeometry args={b.size} />
-            <meshStandardMaterial
-              color={b.color}
-              roughness={0.4}
-              metalness={0.2}
-            />
-          </mesh>
-          {/* Accent roof structure */}
-          <mesh position={[0, b.size[1] / 2 + 1, 0]}>
-            <boxGeometry args={[b.size[0] * 0.7, 2, b.size[2] * 0.7]} />
-            <meshStandardMaterial color="#0284c7" emissive="#0369a1" emissiveIntensity={0.2} />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
+interface TileLoadErrorEvent {
+  tile?: unknown;
+  error?: unknown;
+  url?: string | URL;
 }
 
-export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatus }: CityTilesProps) {
+function getProviderDisplayName(sceneMode: SceneMode): string {
+  if (sceneMode === "photorealistic") {
+    return "Google Photorealistic 3D Tiles";
+  }
+  if (sceneMode === "terrain-buildings") {
+    return "Cesium Ion World Terrain & OSM Buildings";
+  }
+  return "Illustrative 3D City";
+}
+
+function classifyTileLoadError(rawError: unknown): {
+  errorType: ProviderStatus["errorType"];
+  descriptiveError: string;
+} {
+  const errorMessage =
+    rawError instanceof Error ? rawError.message : String(rawError || "");
+  const normalized = errorMessage.toLowerCase();
+
+  if (
+    normalized.includes("401") ||
+    normalized.includes("403") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("key")
+  ) {
+    return {
+      errorType: "denied",
+      descriptiveError:
+        "Access denied by 3D tile provider. Please verify API key and restrictions.",
+    };
+  }
+  if (normalized.includes("404") || normalized.includes("not found")) {
+    return {
+      errorType: "no_coverage",
+      descriptiveError: "3D imagery coverage is unavailable for this location.",
+    };
+  }
+  if (
+    normalized.includes("failed to fetch") ||
+    normalized.includes("network") ||
+    normalized.includes("abort")
+  ) {
+    return {
+      errorType: "network",
+      descriptiveError: "Network connection failed while streaming 3D tiles.",
+    };
+  }
+
+  return {
+    errorType: "failed",
+    descriptiveError: `Tile streaming failed: ${errorMessage || "Unknown error"}`,
+  };
+}
+
+function buildInitialProviderStatus(
+  sceneMode: SceneMode,
+  hasGoogleKey: boolean,
+  hasCesiumToken: boolean
+): ProviderStatus {
+  const provider = getProviderDisplayName(sceneMode);
+  if (sceneMode === "procedural") {
+    return {
+      provider,
+      ready: true,
+      hasCredentials: true,
+      error: null,
+      errorType: null,
+      geometryRendered: true,
+      mode: "procedural",
+    };
+  }
+
+  const hasCredentials = sceneMode === "photorealistic" ? hasGoogleKey : hasCesiumToken;
+  const missingMessage =
+    sceneMode === "photorealistic"
+      ? "Google Map Tiles API key is not configured."
+      : "Cesium Ion token is not configured.";
+
+  return {
+    provider,
+    ready: false,
+    hasCredentials,
+    error: hasCredentials ? null : missingMessage,
+    errorType: hasCredentials ? null : "missing_credential",
+    geometryRendered: false,
+    mode: sceneMode,
+  };
+}
+
+/**
+ * Renders either configured real-city 3D tile providers or the procedural illustrative skyline.
+ */
+export function CityTiles({
+  anchor,
+  sceneMode,
+  onPickCoordinate,
+  onProviderStatus,
+}: CityTilesProps) {
   const geometryRenderedRef = useRef<boolean>(false);
-  const activeAnchorIdRef = useRef<string>(anchor.id);
 
   const googleKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_TILE_KEY || "";
   const cesiumToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN || "";
+  const hasGoogleKey = googleKey.trim().length > 0;
+  const hasCesiumToken = cesiumToken.trim().length > 0;
 
-  const hasGoogleKey = Boolean(googleKey && googleKey.trim().length > 0);
-  const hasCesiumToken = Boolean(cesiumToken && cesiumToken.trim().length > 0);
+  const anchorKeySuffix = `${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`;
 
-  // Geographic reorientation parameters: centers (lat, lon, height) at Three.js scene origin (0, 0, 0)
-  // with +Y pointing Up, +X pointing West, +Z pointing North (OBJECT_FRAME)
-  const reorientationArgs = useMemo(() => {
-    return [
+  const reorientationArgs = useMemo(
+    () => [
       {
         lat: (anchor.coordinates.lat * Math.PI) / 180,
         lon: (anchor.coordinates.lon * Math.PI) / 180,
         height: anchor.altitudeOffset || 0,
         recenter: true,
       },
-    ];
-  }, [anchor.coordinates.lat, anchor.coordinates.lon, anchor.altitudeOffset]);
+    ],
+    [anchor.coordinates.lat, anchor.coordinates.lon, anchor.altitudeOffset]
+  );
 
-  // Synchronize anchor changes and initial provider readiness
   useEffect(() => {
-    activeAnchorIdRef.current = anchor.id;
-    geometryRenderedRef.current = false;
-
-    if (sceneMode === "photorealistic") {
-      if (!hasGoogleKey) {
-        onProviderStatus?.({
-          provider: "Google Photorealistic 3D Tiles",
-          ready: false,
-          hasCredentials: false,
-          error: "Google Map Tiles API key is not configured.",
-          errorType: "missing_credential",
-          geometryRendered: false,
-          mode: "photorealistic",
-        });
-      } else {
-        onProviderStatus?.({
-          provider: "Google Photorealistic 3D Tiles",
-          ready: false,
-          hasCredentials: true,
-          error: null,
-          errorType: null,
-          geometryRendered: false,
-          mode: "photorealistic",
-        });
-      }
-    } else if (sceneMode === "terrain-buildings") {
-      if (!hasCesiumToken) {
-        onProviderStatus?.({
-          provider: "Cesium Ion World Terrain & OSM Buildings",
-          ready: false,
-          hasCredentials: false,
-          error: "Cesium Ion token is not configured.",
-          errorType: "missing_credential",
-          geometryRendered: false,
-          mode: "terrain-buildings",
-        });
-      } else {
-        onProviderStatus?.({
-          provider: "Cesium Ion World Terrain & OSM Buildings",
-          ready: false,
-          hasCredentials: true,
-          error: null,
-          errorType: null,
-          geometryRendered: false,
-          mode: "terrain-buildings",
-        });
-      }
-    } else if (sceneMode === "procedural") {
-      geometryRenderedRef.current = true;
-      onProviderStatus?.({
-        provider: "Illustrative 3D City",
-        ready: true,
-        hasCredentials: true,
-        error: null,
-        errorType: null,
-        geometryRendered: true,
-        mode: "procedural",
-      });
-    }
+    geometryRenderedRef.current = sceneMode === "procedural";
+    onProviderStatus?.(buildInitialProviderStatus(sceneMode, hasGoogleKey, hasCesiumToken));
   }, [
     anchor.id,
     anchor.coordinates.lat,
@@ -253,30 +163,21 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
     onProviderStatus,
   ]);
 
-  // Handlers for actual provider geometry rendering confirmation
   const handleGeometryVisible = useCallback(() => {
-    if (!geometryRenderedRef.current) {
-      geometryRenderedRef.current = true;
-      const providerName =
-        sceneMode === "photorealistic"
-          ? "Google Photorealistic 3D Tiles"
-          : "Cesium Ion World Terrain & OSM Buildings";
-
-      onProviderStatus?.({
-        provider: providerName,
-        ready: true,
-        hasCredentials: true,
-        error: null,
-        errorType: null,
-        geometryRendered: true,
-        mode: sceneMode,
-      });
+    if (geometryRenderedRef.current) {
+      return;
     }
+    geometryRenderedRef.current = true;
+    onProviderStatus?.({
+      provider: getProviderDisplayName(sceneMode),
+      ready: true,
+      hasCredentials: true,
+      error: null,
+      errorType: null,
+      geometryRendered: true,
+      mode: sceneMode,
+    });
   }, [sceneMode, onProviderStatus]);
-
-  const handleLoadModel = useCallback(() => {
-    handleGeometryVisible();
-  }, [handleGeometryVisible]);
 
   const handleTileVisibilityChange = useCallback(
     (event: { visible?: boolean }) => {
@@ -288,39 +189,10 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
   );
 
   const handleLoadError = useCallback(
-    (event: { tile?: any; error?: any; url?: any }) => {
-      const err = event?.error;
-      const errMsg = err?.message || String(err || "");
-      let errorType: "denied" | "no_coverage" | "network" | "failed" = "failed";
-      let descriptiveError = `Tile streaming failed: ${errMsg || "Unknown error"}`;
-
-      const lower = errMsg.toLowerCase();
-      if (
-        lower.includes("401") ||
-        lower.includes("403") ||
-        lower.includes("unauthorized") ||
-        lower.includes("forbidden") ||
-        lower.includes("key")
-      ) {
-        errorType = "denied";
-        descriptiveError = "Access denied by 3D tile provider. Please verify API key and restrictions.";
-      } else if (lower.includes("404") || lower.includes("not found")) {
-        errorType = "no_coverage";
-        descriptiveError = "3D imagery coverage is unavailable for this location.";
-      } else if (
-        lower.includes("failed to fetch") ||
-        lower.includes("network") ||
-        lower.includes("abort")
-      ) {
-        errorType = "network";
-        descriptiveError = "Network connection failed while streaming 3D tiles.";
-      }
-
+    (event: TileLoadErrorEvent) => {
+      const { errorType, descriptiveError } = classifyTileLoadError(event?.error);
       onProviderStatus?.({
-        provider:
-          sceneMode === "photorealistic"
-            ? "Google Photorealistic 3D Tiles"
-            : "Cesium Ion World Terrain & OSM Buildings",
+        provider: getProviderDisplayName(sceneMode),
         ready: false,
         hasCredentials: true,
         error: descriptiveError,
@@ -334,8 +206,10 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
 
   const handlePickPoint = useCallback(
     (point: THREE.Vector3) => {
-      if (!onPickCoordinate) return;
-      const geo = toGeodetic(
+      if (!onPickCoordinate) {
+        return;
+      }
+      const geodetic = toGeodetic(
         { x: point.x, y: point.y, z: point.z },
         {
           lat: anchor.coordinates.lat,
@@ -343,26 +217,24 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
           alt: anchor.altitudeOffset,
         }
       );
-      onPickCoordinate({ lat: geo.lat, lon: geo.lon });
+      onPickCoordinate({ lat: geodetic.lat, lon: geodetic.lon });
     },
     [anchor, onPickCoordinate]
   );
 
+  const handleGroupClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    handlePickPoint(event.point);
+  };
+
   return (
     <group name="city-tiles-root">
-      {/* 1. Google Photorealistic 3D Tiles when credentials available */}
       {sceneMode === "photorealistic" && hasGoogleKey && (
-        <group
-          key={`group-google-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
-          onClick={(e: ThreeEvent<MouseEvent>) => {
-            e.stopPropagation();
-            handlePickPoint(e.point);
-          }}
-        >
+        <group key={`group-google-${anchorKeySuffix}`} onClick={handleGroupClick}>
           <TilesRenderer
-            key={`google-tiles-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+            key={`google-tiles-${anchorKeySuffix}`}
             url={`https://tile.googleapis.com/v1/3dtiles/root.json?key=${googleKey}`}
-            onLoadModel={handleLoadModel}
+            onLoadModel={handleGeometryVisible}
             onTileVisibilityChange={handleTileVisibilityChange}
             onLoadError={handleLoadError}
           >
@@ -377,25 +249,23 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
         </group>
       )}
 
-      {/* 2. Cesium Ion World Terrain & OSM Buildings when credentials available */}
       {sceneMode === "terrain-buildings" && hasCesiumToken && (
         <group
-          key={`group-cesium-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+          key={`group-cesium-${anchorKeySuffix}`}
           name="cesium-ion-layers"
-          onClick={(e: ThreeEvent<MouseEvent>) => {
-            e.stopPropagation();
-            handlePickPoint(e.point);
-          }}
+          onClick={handleGroupClick}
         >
-          {/* Cesium OSM Buildings (Asset 96188) */}
           <TilesRenderer
-            key={`cesium-osm-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+            key={`cesium-osm-${anchorKeySuffix}`}
             url="https://assets.ion.cesium.com/96188/tileset.json"
-            onLoadModel={handleLoadModel}
+            onLoadModel={handleGeometryVisible}
             onTileVisibilityChange={handleTileVisibilityChange}
             onLoadError={handleLoadError}
           >
-            <TilesPlugin plugin={CesiumIonAuthPlugin} args={[{ apiToken: cesiumToken, assetId: "96188" }]} />
+            <TilesPlugin
+              plugin={CesiumIonAuthPlugin}
+              args={[{ apiToken: cesiumToken, assetId: "96188" }]}
+            />
             <TilesPlugin plugin={ReorientationPlugin} args={reorientationArgs} />
             <TilesPlugin plugin={GLTFExtensionsPlugin} />
             <TilesPlugin plugin={TileCompressionPlugin} />
@@ -404,15 +274,17 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
             <TilesAttributionOverlay />
           </TilesRenderer>
 
-          {/* Cesium World Terrain (Asset 1) */}
           <TilesRenderer
-            key={`cesium-terrain-${anchor.id}-${anchor.coordinates.lat.toFixed(4)}-${anchor.coordinates.lon.toFixed(4)}`}
+            key={`cesium-terrain-${anchorKeySuffix}`}
             url="https://assets.ion.cesium.com/1/tileset.json"
-            onLoadModel={handleLoadModel}
+            onLoadModel={handleGeometryVisible}
             onTileVisibilityChange={handleTileVisibilityChange}
             onLoadError={handleLoadError}
           >
-            <TilesPlugin plugin={CesiumIonAuthPlugin} args={[{ apiToken: cesiumToken, assetId: "1" }]} />
+            <TilesPlugin
+              plugin={CesiumIonAuthPlugin}
+              args={[{ apiToken: cesiumToken, assetId: "1" }]}
+            />
             <TilesPlugin plugin={ReorientationPlugin} args={reorientationArgs} />
             <TilesPlugin plugin={QuantizedMeshPlugin} />
             <TilesPlugin plugin={UpdateOnChangePlugin} />
@@ -420,12 +292,8 @@ export function CityTiles({ anchor, sceneMode, onPickCoordinate, onProviderStatu
         </group>
       )}
 
-      {/* 3. High-fidelity procedural 3D textured mesh (when chosen explicitly or offline) */}
       {sceneMode === "procedural" && (
-        <ProceduralCityBlocks
-          anchor={anchor}
-          onPick={handlePickPoint}
-        />
+        <ProceduralCityBlocks anchor={anchor} onPick={handlePickPoint} />
       )}
     </group>
   );

@@ -1,11 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 
 const ARTIFACT_DIR = "C:/Users/vazem/.gemini/antigravity-cli/brain/666b0fd3-02b5-4222-9992-9838ffe390f5/screenshots";
 const PARENT_ARTIFACT_DIR = "C:/Users/vazem/.gemini/antigravity-cli/brain/666b0fd3-02b5-4222-9992-9838ffe390f5";
 
-async function labelSampleData(page: any) {
+async function labelSampleData(page: Page) {
   await page.evaluate(() => {
     if (document.getElementById("sample-data-watermark")) return;
     const b = document.createElement("div");

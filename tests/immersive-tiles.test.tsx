@@ -8,12 +8,28 @@ import { ProviderStatus } from "@/lib/immersive/types";
 
 import { ReorientationPlugin } from "3d-tiles-renderer/plugins";
 
+interface CapturedTilesRendererProps {
+  url?: string;
+  onLoadError?: (event: { error: unknown }) => void;
+  onLoadModel?: (event: { scene: unknown; tile: unknown; url: string }) => void;
+}
+
+interface CapturedReorientationArg {
+  lat: number;
+  lon: number;
+  height: number;
+  recenter: boolean;
+}
+
 // Capture props passed to TilesRenderer
-let lastTilesRendererProps: any = null;
-let lastReorientationArgs: any = null;
+let lastTilesRendererProps: CapturedTilesRendererProps | null = null;
+let lastReorientationArgs: CapturedReorientationArg[] | null = null;
 
 vi.mock("3d-tiles-renderer/r3f", () => ({
-  TilesRenderer: ({ children, ...props }: any) => {
+  TilesRenderer: ({
+    children,
+    ...props
+  }: React.PropsWithChildren<CapturedTilesRendererProps>) => {
     lastTilesRendererProps = props;
     return (
       <div data-testid="tiles-renderer" data-url={props.url}>
@@ -21,9 +37,9 @@ vi.mock("3d-tiles-renderer/r3f", () => ({
       </div>
     );
   },
-  TilesPlugin: ({ plugin, args }: any) => {
+  TilesPlugin: ({ plugin, args }: { plugin?: { name?: string }; args?: CapturedReorientationArg[] }) => {
     if (plugin && (plugin.name === "ReorientationPlugin" || plugin === ReorientationPlugin)) {
-      lastReorientationArgs = args;
+      lastReorientationArgs = args ?? null;
     }
     return (
       <div
@@ -42,19 +58,23 @@ vi.mock("@react-three/fiber", () => ({
     gl: { domElement: { parentNode: { appendChild: vi.fn() } } },
     invalidate: vi.fn(),
   }),
-  Canvas: ({ children }: any) => <div data-testid="r3f-canvas">{children}</div>,
+  Canvas: ({ children }: React.PropsWithChildren) => (
+    <div data-testid="r3f-canvas">{children}</div>
+  ),
   useFrame: vi.fn(),
 }));
 
 vi.mock("@react-three/drei", () => {
-  const MockOrbitControls = React.forwardRef(function MockOrbitControls(props: any, ref: any) {
-    React.useImperativeHandle(ref, () => ({
-      object: { position: { set: vi.fn() } },
-      target: { set: vi.fn() },
-      update: vi.fn(),
-    }));
-    return <div data-testid="orbit-controls" />;
-  });
+  const MockOrbitControls = React.forwardRef<unknown, Record<string, unknown>>(
+    function MockOrbitControls(_props, ref) {
+      React.useImperativeHandle(ref, () => ({
+        object: { position: { set: vi.fn() } },
+        target: { set: vi.fn() },
+        update: vi.fn(),
+      }));
+      return <div data-testid="orbit-controls" />;
+    }
+  );
 
   return {
     OrbitControls: MockOrbitControls,
@@ -74,7 +94,7 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
         return {};
       }
       return null;
-    }) as any;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
   });
 
   afterEach(() => {
@@ -98,11 +118,11 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
 
       // Verify TilesRenderer mounted with Google key
       expect(lastTilesRendererProps).not.toBeNull();
-      expect(lastTilesRendererProps.url).toContain("dummy-test-key-valid");
+      expect(lastTilesRendererProps!.url).toContain("dummy-test-key-valid");
 
       // Trigger load error with 403 Forbidden
       act(() => {
-        lastTilesRendererProps.onLoadError({
+        lastTilesRendererProps!.onLoadError?.({
           error: new Error("403 Forbidden: Request denied for API key"),
         });
       });
@@ -129,7 +149,7 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
       );
 
       act(() => {
-        lastTilesRendererProps.onLoadError({
+        lastTilesRendererProps!.onLoadError?.({
           error: new TypeError("Failed to fetch"),
         });
       });
@@ -154,7 +174,7 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
       );
 
       act(() => {
-        lastTilesRendererProps.onLoadError({
+        lastTilesRendererProps!.onLoadError?.({
           error: new Error("Corrupted Draco compressed payload"),
         });
       });
@@ -183,9 +203,9 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
       // Verify Delhi reorientation coordinates (lat: 28.6139, lon: 77.209)
       const delhiLatRad = (28.6139 * Math.PI) / 180;
       const delhiLonRad = (77.209 * Math.PI) / 180;
-      expect(lastReorientationArgs[0].lat).toBeCloseTo(delhiLatRad, 4);
-      expect(lastReorientationArgs[0].lon).toBeCloseTo(delhiLonRad, 4);
-      expect(lastReorientationArgs[0].recenter).toBe(true);
+      expect(lastReorientationArgs![0].lat).toBeCloseTo(delhiLatRad, 4);
+      expect(lastReorientationArgs![0].lon).toBeCloseTo(delhiLonRad, 4);
+      expect(lastReorientationArgs![0].recenter).toBe(true);
 
       // Switch to Tokyo while Delhi tiles are still loading (geometryRendered is false)
       rerender(
@@ -199,8 +219,8 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
       // Verify Tokyo reorientation coordinates (lat: 35.6812, lon: 139.7671)
       const tokyoLatRad = (35.6812 * Math.PI) / 180;
       const tokyoLonRad = (139.7671 * Math.PI) / 180;
-      expect(lastReorientationArgs[0].lat).toBeCloseTo(tokyoLatRad, 4);
-      expect(lastReorientationArgs[0].lon).toBeCloseTo(tokyoLonRad, 4);
+      expect(lastReorientationArgs![0].lat).toBeCloseTo(tokyoLatRad, 4);
+      expect(lastReorientationArgs![0].lon).toBeCloseTo(tokyoLonRad, 4);
 
       // Status must be un-rendered (ready: false) for the new city until models load
       const latestStatus: ProviderStatus = onStatus.mock.calls[onStatus.mock.calls.length - 1][0];
@@ -209,7 +229,11 @@ describe("Immersive 3D City - Regression & Household Tests", () => {
 
       // Now Tokyo tile model arrives
       act(() => {
-        lastTilesRendererProps.onLoadModel({ scene: {}, tile: {}, url: "https://tile.googleapis.com/test" });
+        lastTilesRendererProps!.onLoadModel?.({
+          scene: {},
+          tile: {},
+          url: "https://tile.googleapis.com/test",
+        });
       });
 
       const confirmedStatus: ProviderStatus = onStatus.mock.calls[onStatus.mock.calls.length - 1][0];

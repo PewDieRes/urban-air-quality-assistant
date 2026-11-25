@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import dynamic from "next/dynamic";
-import { Map, Box, Loader2, Sparkles } from "lucide-react";
+import { Map, Box, Loader2 } from "lucide-react";
 import { AirQualityViewProps, MapView } from "@/lib/immersive/types";
 import { AirQualityMap } from "./air-quality-map";
 import { ForecastTimeline } from "./forecast-timeline";

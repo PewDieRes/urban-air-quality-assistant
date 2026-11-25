@@ -19,7 +19,6 @@ export function ForecastPanel({
   lat,
   lon,
   locationName,
-  onOpenPlan,
   onSelectHour,
   selectedInstant,
   onExploreMap,

@@ -3,9 +3,8 @@ import {
   generatePlan,
   validatePlanNarrative,
   validateAndSanitizePlanNarrative,
-  buildDeterministicNarrative,
 } from "@/lib/plan/gemini";
-import { PlanInput, PlanFacts, PlanNarrative } from "@/lib/plan/types";
+import { PlanInput, PlanFacts } from "@/lib/plan/types";
 
 describe("grounded plan generation and validation", () => {
   const sampleFacts: PlanFacts = {
