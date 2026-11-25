@@ -1,11 +1,12 @@
 # Deployment & Atmospheric Model Verification Guide
 
 ## 1. Web Application Deployment (Vercel)
-- **Framework:** Next.js 14 App Router
+- **Framework:** Next.js 15 App Router (`next@15.5.29`, `react@19.3.1`)
+- **Runtime:** Node.js 20.9+ (CI verifies on Node 22; `sharp@0.35.5` requires `>=20.9.0`) and Python 3.11 for `services/smoke`
 - **Target Platform:** Vercel Hobby tier
 - **Environment Variables:**
   - `GEMINI_API_KEY`: Google Gemini API key for structured household planning narratives.
-  - `GEMINI_MODEL`: Model identifier (defaults to `gemini-3.8-flash`).
+  - `GEMINI_MODEL` (optional): Primary Gemini model override. Defaults to `gemini-3.5-flash-lite` in `lib/plan/gemini.ts` (falling back once to `gemini-flash-lite-latest`, or from a custom `GEMINI_MODEL` back to `gemini-3.5-flash-lite`).
   - `FIRMS_MAP_KEY`: NASA FIRMS Map Key for real-time VIIRS/MODIS fire detections.
   - `SMOKE_SERVICE_URL` (optional): URL of verified external HYSPLIT container service.
   - `SMOKE_SERVICE_TOKEN` (optional): Bearer credential for the runner.

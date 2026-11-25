@@ -509,8 +509,8 @@ export function AirQualityMap({
             aria-label="Toggle NASA FIRMS active fire detections"
             className={`flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border backdrop-blur transition shadow-sm ${
               showFires
-                ? "bg-amber-600/90 text-white border-amber-500 shadow-amber-950"
-                : "bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-slate-800"
+                ? "bg-amber-700 hover:bg-amber-800 text-white border-amber-500 shadow-amber-950"
+                : "bg-slate-900/95 text-slate-200 border-slate-700 hover:bg-slate-800 hover:text-white"
             }`}
           >
             <Flame className="w-3.5 h-3.5 text-amber-300" />
@@ -524,8 +524,8 @@ export function AirQualityMap({
             aria-label="Toggle historical smoke case"
             className={`flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border backdrop-blur transition shadow-sm ${
               showHistoricalSmoke
-                ? "bg-sky-600/90 text-white border-sky-400 shadow-sky-950"
-                : "bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-slate-800"
+                ? "bg-sky-700 hover:bg-sky-800 text-white border-sky-400 shadow-sky-950"
+                : "bg-slate-900/95 text-slate-200 border-slate-700 hover:bg-slate-800 hover:text-white"
             }`}
           >
             <Wind className="w-3.5 h-3.5 text-sky-300" />
@@ -538,8 +538,8 @@ export function AirQualityMap({
             aria-label={is3D ? "Switch to 2D flat view" : "Switch to 3D perspective with extruded buildings"}
             className={`flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold border backdrop-blur transition shadow-sm ${
               is3D
-                ? "bg-emerald-600 text-white border-emerald-500 shadow-emerald-950"
-                : "bg-slate-900/90 text-slate-200 border-slate-700 hover:bg-slate-800"
+                ? "bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-500 shadow-emerald-950"
+                : "bg-slate-900/95 text-slate-200 border-slate-700 hover:bg-slate-800 hover:text-white"
             }`}
           >
             <Box className="w-3.5 h-3.5" />
@@ -550,7 +550,7 @@ export function AirQualityMap({
             <button
               type="button"
               onClick={onOpenPlan}
-              className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/30 backdrop-blur shadow-sm transition"
+              className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white border border-emerald-500/40 backdrop-blur shadow-sm transition"
             >
               <span>Build my smog plan</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
@@ -570,7 +570,8 @@ export function AirQualityMap({
             <button
               type="button"
               onClick={() => setShowHistoricalSmoke(false)}
-              className="p-1 text-slate-400 hover:text-slate-200"
+              aria-label="Close historical smoke details"
+              className="p-1 text-slate-300 hover:text-white"
             >
               <X className="w-4 h-4" />
             </button>
@@ -681,8 +682,8 @@ export function AirQualityMap({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400 border-t border-slate-800/50 pt-1">
-              <span className="text-slate-500 font-medium">US AQI Reference Scale:</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-300 border-t border-slate-800/50 pt-1">
+              <span className="text-slate-300 font-medium">US AQI Reference Scale:</span>
               <div className="flex flex-wrap items-center gap-3">
                 <span>0-50</span>
                 <span>51-100</span>

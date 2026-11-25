@@ -264,8 +264,8 @@ export function ImmersiveCityView({
               onClick={() => setSceneMode("photorealistic")}
               className={`px-2.5 py-1 rounded-lg font-medium transition ${
                 sceneMode === "photorealistic"
-                  ? "bg-emerald-600 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white shadow"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/70"
               }`}
               title="Google Photorealistic 3D Tiles"
             >
@@ -276,8 +276,8 @@ export function ImmersiveCityView({
               onClick={() => setSceneMode("terrain-buildings")}
               className={`px-2.5 py-1 rounded-lg font-medium transition ${
                 sceneMode === "terrain-buildings"
-                  ? "bg-emerald-600 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white shadow"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/70"
               }`}
               title="Cesium Ion World Terrain & OSM Buildings"
             >
@@ -288,8 +288,8 @@ export function ImmersiveCityView({
               onClick={() => setSceneMode("procedural")}
               className={`px-2.5 py-1 rounded-lg font-medium transition ${
                 sceneMode === "procedural"
-                  ? "bg-emerald-600 text-white shadow"
-                  : "text-slate-400 hover:text-slate-200"
+                  ? "bg-emerald-700 hover:bg-emerald-800 text-white shadow"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800/70"
               }`}
               title="High-fidelity procedural illustrative 3D city layout"
             >
@@ -418,7 +418,7 @@ export function ImmersiveCityView({
               <button
                 type="button"
                 onClick={() => setSceneMode("procedural")}
-                className="w-full sm:flex-1 py-2 px-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs transition shadow-md flex items-center justify-center gap-1.5"
+                className="w-full sm:flex-1 py-2 px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs transition shadow-md flex items-center justify-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Explore illustrative city</span>
@@ -443,7 +443,7 @@ export function ImmersiveCityView({
             <button
               type="button"
               onClick={onBuildPlan}
-              className="ml-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] transition shadow"
+              className="ml-1 px-2 py-0.5 rounded bg-emerald-700 hover:bg-emerald-800 text-white font-medium text-[11px] transition shadow"
             >
               Build Plan
             </button>
@@ -452,7 +452,7 @@ export function ImmersiveCityView({
       </div>
 
       {/* Bottom Right Required Attribution Overlay */}
-      <div className="absolute bottom-2 right-3 z-10 pointer-events-none text-[10px] text-slate-400/90 bg-slate-950/70 backdrop-blur px-2 py-0.5 rounded border border-slate-800">
+      <div className="absolute bottom-2 right-3 z-10 pointer-events-none text-[10px] text-slate-300 bg-slate-950/90 backdrop-blur px-2 py-0.5 rounded border border-slate-800">
         Tiles &amp; Data: {sceneMode === "photorealistic" ? "Google Photorealistic 3D Tiles" : sceneMode === "terrain-buildings" ? "Cesium Ion World Terrain & OSM" : "OpenStreetMap"} · Open-Meteo
       </div>
     </div>

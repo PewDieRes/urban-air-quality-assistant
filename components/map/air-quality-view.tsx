@@ -19,7 +19,7 @@ const ImmersiveCityView = dynamic(
       <div className="w-full h-[540px] bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-300">
         <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
         <span className="text-sm font-medium">Loading Immersive 3D City Engine...</span>
-        <span className="text-xs text-slate-500 font-mono">Initializing Three.js &amp; 3D Tiles pipeline</span>
+        <span className="text-xs text-slate-400 font-mono">Initializing Three.js &amp; 3D Tiles pipeline</span>
       </div>
     ),
   }
@@ -46,8 +46,8 @@ export function AirQualityView({
             onClick={() => setViewMode("map")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
               viewMode === "map"
-                ? "bg-emerald-600 text-white shadow"
-                : "text-slate-400 hover:text-slate-200"
+                ? "bg-emerald-700 hover:bg-emerald-800 text-white shadow"
+                : "text-slate-300 hover:text-white hover:bg-slate-800/70"
             }`}
           >
             <Map className="w-3.5 h-3.5" />
@@ -59,13 +59,13 @@ export function AirQualityView({
             onClick={() => setViewMode("immersive")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
               viewMode === "immersive"
-                ? "bg-emerald-600 text-white shadow"
-                : "text-slate-400 hover:text-slate-200"
+                ? "bg-emerald-700 hover:bg-emerald-800 text-white shadow"
+                : "text-slate-300 hover:text-white hover:bg-slate-800/70"
             }`}
           >
-            <Box className="w-3.5 h-3.5 text-sky-400" />
+            <Box className="w-3.5 h-3.5 text-sky-300" />
             <span>Immersive 3D City</span>
-            <span className="text-[10px] px-1 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-800/50">
+            <span className="text-[10px] px-1 py-0.2 rounded bg-sky-950 text-sky-200 border border-sky-800/50">
               New
             </span>
           </button>

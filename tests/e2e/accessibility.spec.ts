@@ -101,30 +101,16 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       });
       expect(duplicateIds).toEqual([]);
 
-      // 2. Run axe-core on planner, header, and forecast chart (full WCAG 2A/2AA including color contrast)
+      // 2. Run full-page axe-core audit on initial page (all WCAG 2A/2AA rules including color-contrast)
       const axePath = require.resolve("axe-core");
       await page.addScriptTag({ path: axePath });
       const initialAxe = await page.evaluate(async () => {
         // @ts-expect-error axe injected on window
-        const scoped = await window.axe.run(
-          { include: [["header"], ["#household-plan-section"], ["[aria-label='Hourly air quality forecast']"]] },
-          { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] } }
-        );
-        // @ts-expect-error axe injected on window
-        const fullNonContrast = await window.axe.run(document, {
+        return await window.axe.run(document, {
           runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
-          rules: { "color-contrast": { enabled: false } },
         });
-        return {
-          scopedViolations: scoped.violations,
-          fullNonContrastViolations: fullNonContrast.violations,
-        };
       });
-      expect(initialAxe.scopedViolations, JSON.stringify(initialAxe.scopedViolations, null, 2)).toEqual([]);
-      expect(
-        initialAxe.fullNonContrastViolations,
-        JSON.stringify(initialAxe.fullNonContrastViolations, null, 2)
-      ).toEqual([]);
+      expect(initialAxe.violations, JSON.stringify(initialAxe.violations, null, 2)).toEqual([]);
 
       // 3. Keyboard-only: select Tokyo Demo button via Tab + Enter
       const tokyoBtn = page.getByRole("button", { name: "Tokyo Demo" });
@@ -230,28 +216,14 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       });
       expect(inputClearance.inputTop).toBeGreaterThanOrEqual(inputClearance.headerBottom - 2);
 
-      // 11. Run axe-core on generated result state (header + planner + result cards + chart)
+      // 11. Run full-page axe-core audit on generated result state (all WCAG 2A/2AA rules including color-contrast)
       const resultAxe = await page.evaluate(async () => {
         // @ts-expect-error axe injected on window
-        const scoped = await window.axe.run(
-          { include: [["header"], ["#household-plan-section"], ["[aria-label='Hourly air quality forecast']"]] },
-          { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] } }
-        );
-        // @ts-expect-error axe injected on window
-        const fullNonContrast = await window.axe.run(document, {
+        return await window.axe.run(document, {
           runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
-          rules: { "color-contrast": { enabled: false } },
         });
-        return {
-          scopedViolations: scoped.violations,
-          fullNonContrastViolations: fullNonContrast.violations,
-        };
       });
-      expect(resultAxe.scopedViolations, JSON.stringify(resultAxe.scopedViolations, null, 2)).toEqual([]);
-      expect(
-        resultAxe.fullNonContrastViolations,
-        JSON.stringify(resultAxe.fullNonContrastViolations, null, 2)
-      ).toEqual([]);
+      expect(resultAxe.violations, JSON.stringify(resultAxe.violations, null, 2)).toEqual([]);
     });
   }
 });

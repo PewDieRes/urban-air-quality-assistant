@@ -30,16 +30,17 @@ Built for **PromptWars Virtual Challenge 6**, the Urban Air Quality Assistant is
    - Starting altitudes: **100m, 500m, and 1,000m AGL**
    - Scientific distinction: Path lines trace modeled air parcel movement; they do NOT claim quantitative mass concentrations or single-source blame. Total forecast PM₂.₅ is presented separately in the regional forecast.
 
-### Step 4: Build My Smog Plan
-1. Scroll down or click **Build my smog plan**.
-2. **Flexible Activities:** Review or edit the flexible activity (e.g. "Grocery Shopping & Errands", duration 1 hour).
-3. **Fixed Commitments:** Notice the preserved "School pickup" commitment that cannot be moved.
-4. **Transport & Emissions:** Specify a 10 km trip by Gasoline Car.
-5. **Household Profile:** Toggle sensitive members (children/elderly) and HEPA purifier presence.
-6. Click **Build My Smog Plan**:
-   - The deterministic engine compares eligible candidate hours and schedules the grocery trip at the cleanest hour (e.g. 14:00 or 18:00) with the lowest PM₂.₅, avoiding the school pickup slot.
-   - Calculates defensible emission savings: ~1.30 kg CO₂ saved by switching to public transit / Metro.
-   - Grounded Gemini explanation synthesizes the daily routine, indoor air filtering routine, and health precautions with zero hallucinated times or fact IDs.
+### Step 4: Plan my day (Household Smog Planner)
+1. Scroll to the planner card or click **Build my smog plan** from the map.
+2. **Flexible Activities:** Review or edit the flexible activity (e.g. "Grocery shopping", duration 60, 90, or 120 minutes).
+3. **Fixed Commitments:** Notice the preserved "School pickup" commitment that stays fixed.
+4. **Transport & Emissions:** Specify an 8 km (default) or 10 km trip by Gasoline Car, and toggle available alternatives (such as Public Transit, Walking, Cycling, EV).
+5. **Household Profile:** Toggle sensitive members and HEPA purifier presence, plus indoor budget tier.
+6. Click **Find a time**:
+   - The deterministic engine evaluates every eligible window with complete forecast coverage and ranks candidates by **time-weighted mean forecast PM₂.₅** across the full activity duration, avoiding the school pickup slot and other scheduled errands.
+   - Separately displays outdoor forecast concentration comparisons (and states plainly when moving adds no forecast benefit) without claiming unmeasured personal inhaled dose.
+   - Computes an estimated CO₂e difference using UK DESNZ/DEFRA (2024) reference factors (`~1.05 kg CO₂e` over `8 km` or `~1.32 kg CO₂e` over `10 km` when shifting solo car travel to rail transit), or omits numeric savings and names the missing input (`trip distance`, `available alternative travel mode`, or `carpool occupancy / avoided vehicle distance`) if unavailable.
+   - Grounded Gemini reasoning explains indoor and transport trade-offs within household constraints without inventing times, measurements, or unavailable options.
 
 ### Step 5: Worldwide Repeatability (Tokyo Demo)
 1. In the header bar, click **Tokyo Demo** (or search "Tokyo" in the city search).
@@ -56,7 +57,7 @@ Built for **PromptWars Virtual Challenge 6**, the Urban Air Quality Assistant is
 - **Public Web Application:** Deployed on Vercel Hobby
 - **Source Repository:** [GitHub Repository URL]
 - **Atmospheric Model:** NOAA HYSPLIT trajectory engine verified with ARL weather cycles
-- **AI Model:** Google Gemini 1.5 Flash structured reasoning engine
+- **AI Model:** Google Gemini via REST API (defaults to `gemini-3.5-flash-lite`, overridable via `GEMINI_MODEL`, with retry to `gemini-flash-lite-latest` and deterministic fallback)
 
 ---
 

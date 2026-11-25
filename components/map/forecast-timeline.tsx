@@ -146,9 +146,9 @@ export function ForecastTimeline({
           </div>
 
           {/* US AQI Reference scale */}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400 border-t border-slate-800/50 pt-1">
-            <span className="text-slate-500 font-medium">US AQI Index (0–500 scale):</span>
-            <div className="flex flex-wrap items-center gap-3 text-slate-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-300 border-t border-slate-800/50 pt-1">
+            <span className="text-slate-300 font-medium">US AQI Index (0–500 scale):</span>
+            <div className="flex flex-wrap items-center gap-3 text-slate-300">
               <span>0–50 Good</span>
               <span>51–100 Moderate</span>
               <span>101–150 Sensitive</span>

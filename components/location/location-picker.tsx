@@ -337,7 +337,7 @@ export function LocationPicker({
                   <div className="text-[11px] text-stone-500">{place.region}</div>
                 )}
               </div>
-              <span className="text-[10px] text-stone-400 font-mono mt-0.5">
+              <span className="text-[10px] text-stone-600 font-mono mt-0.5">
                 {place.lat.toFixed(2)}°, {place.lon.toFixed(2)}°
               </span>
             </button>
