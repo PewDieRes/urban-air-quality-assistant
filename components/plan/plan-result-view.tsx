@@ -2,6 +2,7 @@ import React from "react";
 import { RefreshCw, Shield, Leaf, Edit3 } from "lucide-react";
 import { PlanFacts, PlanNarrative } from "@/lib/plan/types";
 import { derivePlanDecision } from "@/lib/plan/decision";
+import { formatPm25Value } from "@/lib/plan/facts";
 import { formatHourlyTime } from "@/lib/forecast/open-meteo";
 
 export interface PlanResultViewProps {
@@ -35,22 +36,57 @@ export function PlanResultView({
       ? narrative.items?.find((i) => i.category === "indoor")
       : null;
 
+  const geminiTransport =
+    planStatus === "gemini_generated" && narrative
+      ? narrative.items?.find((i) => i.category === "transport")
+      : null;
+
   const displayedIndoorAction =
     planStatus === "gemini_generated" && geminiIndoor
       ? geminiIndoor.action
-      : (facts.indoorRecommendations[0] ||
-        "Operate HEPA particle filtration indoors during peak pollution hours.");
+      : facts.indoorRecommendations[0] ||
+        "Keep exterior windows closed during high forecast PM₂.₅ hours.";
 
   const displayedIndoorWhy =
     planStatus === "gemini_generated" && geminiIndoor?.whyItHelps
       ? geminiIndoor.whyItHelps
-      : null;
+      : "Reduces fine particulate matter (PM₂.₅) entering indoor breathing zones.";
+
+  const displayedIndoorBeneficiary =
+    planStatus === "gemini_generated" && geminiIndoor?.beneficiary
+      ? geminiIndoor.beneficiary
+      : facts.indoorRecommendations.length > 1
+      ? "Children, older adults, and sensitive household members"
+      : "All household occupants";
+
+  const tc = facts.transportComparison;
+  const hasQuantifiedCo2 =
+    tc?.estimatedCo2KgSaved !== null &&
+    tc?.estimatedCo2KgSaved !== undefined &&
+    tc.estimatedCo2KgSaved > 0;
+  const hasMissingInputs = Boolean(tc?.missingInputs && tc.missingInputs.length > 0 && !hasQuantifiedCo2);
+
+  const transportBadgeText = hasQuantifiedCo2
+    ? "Est. emissions"
+    : hasMissingInputs
+    ? "Missing input"
+    : "Exposure guidance";
+
+  const displayedTransportText =
+    planStatus === "gemini_generated" && geminiTransport
+      ? `${geminiTransport.action} ${geminiTransport.whyItHelps}`
+      : tc?.explanation || defaultTransportAdvice;
+
+  const displayedTransportBeneficiary =
+    planStatus === "gemini_generated" && geminiTransport?.beneficiary
+      ? geminiTransport.beneficiary
+      : tc?.beneficiary || "Household traveler";
 
   if (!decisionOutput) return null;
 
   return (
     <div className="space-y-4 pt-2">
-      {/* Result Section Header with Status Badge */}
+      {/* Result Section Header with Status Controls */}
       <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 pb-3">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-teal-700" />
@@ -84,7 +120,7 @@ export function PlanResultView({
         </div>
       </div>
 
-      {/* 1. One Headline Giving the Actual Decision */}
+      {/* 1. Primary Decision Headline & Metric-Explicit Concentration Explanation */}
       <div className="bg-teal-50/60 border border-teal-200/80 rounded-xl p-4">
         <h3
           ref={resultHeadingRef}
@@ -93,13 +129,12 @@ export function PlanResultView({
         >
           {decisionOutput.headline}
         </h3>
-        {/* 2. One Sentence Explaining Why That Hour Fits */}
         <p className="text-xs text-stone-700 mt-1 leading-relaxed">
           {decisionOutput.explanation}
         </p>
       </div>
 
-      {/* 3. Short Timeline: What stays fixed and what can move */}
+      {/* 2. Short Timeline: Fixed Commitment + Flexible Activity */}
       <div className="bg-stone-50 border border-stone-200/80 rounded-xl p-3.5 space-y-2">
         <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 block">
           Day Schedule Timeline
@@ -139,18 +174,31 @@ export function PlanResultView({
                   timeZone
                 )
               : "";
-            const pmStr = best && best.pm25 !== null ? `${Math.round(best.pm25)} µg/m³` : "";
+            const rawMean = best ? (best.durationMeanPm25 ?? best.pm25) : null;
+            const durLabel = act.durationMinutes === 60 ? "1h mean" : `${act.durationMinutes}m mean`;
+            const meanStr =
+              rawMean !== null && rawMean !== undefined
+                ? `${formatPm25Value(rawMean)} µg/m³ (${durLabel})`
+                : "";
+            const startHrVal = best?.startHourPm25;
+            const showSeparateStartHour =
+              best &&
+              startHrVal !== null &&
+              startHrVal !== undefined &&
+              rawMean !== null &&
+              rawMean !== undefined &&
+              Math.abs(startHrVal - rawMean) > 0.05;
 
             return (
               <div
                 key={act.id}
-                className="flex items-center justify-between p-2 rounded-lg bg-teal-50/50 border border-teal-200"
+                className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-teal-50/50 border border-teal-200"
               >
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-teal-600" />
                   <span className="font-semibold text-teal-950">{act.title}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <span className="font-bold text-teal-900 font-mono">
                     <span>{startTime}</span>
                     {endTime && (
@@ -159,9 +207,20 @@ export function PlanResultView({
                       </>
                     )}
                   </span>
-                  {pmStr && (
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">
-                      {pmStr}
+                  {meanStr && (
+                    <span
+                      data-testid="activity-duration-mean"
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-teal-100 text-teal-800"
+                    >
+                      {meanStr}
+                    </span>
+                  )}
+                  {showSeparateStartHour && (
+                    <span
+                      data-testid="activity-start-hour-pm25"
+                      className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white text-stone-600 border border-stone-200"
+                    >
+                      Start hr: {formatPm25Value(startHrVal)} µg/m³
                     </span>
                   )}
                 </div>
@@ -171,9 +230,9 @@ export function PlanResultView({
         </div>
       </div>
 
-      {/* 4. One Practical Indoor Action & One Realistic Transport Alternative */}
+      {/* 3. Household Indoor Action & Feasible Transport Alternative */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-        {/* Practical indoor action */}
+        {/* Indoor action */}
         <div className="p-3.5 rounded-xl bg-white border border-stone-200 space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-stone-600 flex items-center gap-1.5">
@@ -203,41 +262,52 @@ export function PlanResultView({
           >
             {displayedIndoorAction}
           </p>
-          {displayedIndoorWhy && (
-            <p className="text-stone-500 text-[11px] leading-snug">
-              {displayedIndoorWhy}
-            </p>
-          )}
+          <p className="text-stone-500 text-[11px] leading-snug">
+            {displayedIndoorWhy} Benefits: {displayedIndoorBeneficiary}.
+          </p>
         </div>
 
-        {/* Realistic transport alternative */}
-        <div className="p-3.5 rounded-xl bg-white border border-stone-200 space-y-1.5">
+        {/* Transport alternative */}
+        <div className="p-3.5 rounded-xl bg-white border border-stone-200 space-y-1.5" data-testid="transport-card">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-stone-600 flex items-center gap-1.5">
               <Leaf className="w-3.5 h-3.5 text-teal-700" />
               Transport Alternative
             </span>
-            {facts.transportComparison?.isEstimate && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 text-stone-600">
-                Estimate
-              </span>
-            )}
+            <span
+              data-testid="transport-type-badge"
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 text-stone-600"
+            >
+              {transportBadgeText}
+            </span>
           </div>
-          <p className="text-stone-800 leading-snug">
-            {facts.transportComparison?.explanation || defaultTransportAdvice}
+          <p className="text-stone-800 leading-snug" data-testid="household-transport-explanation">
+            {displayedTransportText}
           </p>
-          {facts.transportComparison?.estimatedCo2KgSaved !== null &&
-            facts.transportComparison?.estimatedCo2KgSaved !== undefined &&
-            facts.transportComparison.estimatedCo2KgSaved > 0 && (
-              <span className="inline-block text-[11px] font-medium text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60">
-                Estimated savings: {facts.transportComparison.estimatedCo2KgSaved}{" "}
-                {facts.transportComparison.units}
-              </span>
-            )}
+          <p className="text-stone-500 text-[11px] leading-snug">
+            Benefits: {displayedTransportBeneficiary}.
+          </p>
+          {hasQuantifiedCo2 && tc && (
+            <span
+              data-testid="transport-co2-estimate"
+              className="inline-block text-[11px] font-medium text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60"
+            >
+              Est. savings: {tc.estimatedCo2KgSaved} {tc.units}
+              {tc.factorMetadata?.isOutsideReferenceGeography ? " (UK ref.)" : ""}
+            </span>
+          )}
+          {hasMissingInputs && tc?.missingInputs && (
+            <span
+              data-testid="transport-missing-inputs"
+              className="inline-block text-[11px] font-medium text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200/80"
+            >
+              Needs: {tc.missingInputs.join(", ")}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* 5. Expandable "How we calculated this" details */}
+      {/* 4. Expandable Calculation Details, Factor Sources & Scope Boundaries */}
       <details className="border border-stone-200 rounded-xl p-3 bg-stone-50/50 text-xs text-stone-600">
         <summary className="cursor-pointer font-semibold text-stone-700 select-none flex items-center justify-between">
           <span>How we calculated this (sources, units &amp; assumptions)</span>
@@ -247,21 +317,36 @@ export function PlanResultView({
         <div className="pt-2 mt-2 border-t border-stone-200/60 space-y-2">
           <div>
             <strong className="text-stone-800">Forecast source:</strong> Copernicus Atmosphere
-            Monitoring Service (CAMS) regional model via Open-Meteo.
+            Monitoring Service (CAMS) regional model via Open-Meteo (stored as UTC instants,
+            displayed in {timeZone}).
           </div>
           <div>
-            <strong className="text-stone-800">Pollution measure:</strong> Fine particulate matter
-            (PM₂.₅ in µg/m³) and US Air Quality Index (0–500 scale).
+            <strong className="text-stone-800">Duration-weighted ranking metric:</strong>{" "}
+            Time-weighted mean forecast PM₂.₅ (µg/m³) across every minute of the full activity
+            duration, using identical metrics for baseline and optimized slots. Candidates with any
+            missing forecast interval are excluded.
           </div>
           <div>
-            <strong className="text-stone-800">Schedule logic:</strong> Evaluated all hours in the
-            requested window where the full duration fits without overlapping fixed commitments,
-            selecting the hour with the lowest forecast PM₂.₅.
+            <strong className="text-stone-800">Concentration vs. exposure &amp; scope:</strong>{" "}
+            Percentage comparisons measure outdoor forecast PM₂.₅ concentration only. Personal
+            inhaled dose depends on exertion, masks, and indoor/vehicle filtration, which are not
+            measured. One household&apos;s trip does not measurably change citywide AQI.
           </div>
-          {facts.transportComparison && (
-            <div>
-              <strong className="text-stone-800">Emissions factor:</strong>{" "}
-              {facts.transportComparison.factorSource}. {facts.transportComparison.assumptions}
+          {tc && (
+            <div className="space-y-1">
+              <div>
+                <strong className="text-stone-800">Transport calculation:</strong>{" "}
+                {tc.factorSource}. {tc.assumptions}
+              </div>
+              {tc.factorMetadata && (
+                <div className="text-[11px] text-stone-500">
+                  Source: {tc.factorMetadata.publication} ({tc.factorMetadata.year}) · Geography:{" "}
+                  {tc.factorMetadata.geography} · Baseline:{" "}
+                  {tc.factorMetadata.baselineModeFactor} · Alternative:{" "}
+                  {tc.factorMetadata.alternativeModeFactor} · Occupancy:{" "}
+                  {tc.factorMetadata.occupancyAssumption}.
+                </div>
+              )}
             </div>
           )}
         </div>

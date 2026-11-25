@@ -56,7 +56,7 @@ describe("derivePlanDecision", () => {
     expect(decision?.headline).toBe("No eligible slot for Grocery shopping");
     expect(decision?.explanation).toContain("School pickup stays at 3 PM");
     expect(decision?.explanation).toContain(
-      "No available hour in your requested window fits your activity around it"
+      "No available slot with complete forecast coverage fits your activity around it"
     );
   });
 
@@ -78,11 +78,11 @@ describe("derivePlanDecision", () => {
     const decision = derivePlanDecision(facts, "Asia/Kolkata");
     expect(decision?.headline).toBe("No eligible slot for Jogging");
     expect(decision?.explanation).toBe(
-      "No available hour in your requested window fits your activity duration. Try widening your time window."
+      "No available slot with complete forecast coverage fits your activity duration. Try widening your time window."
     );
   });
 
-  it("handles earliest slot already being the best (isEarliestAlreadyBest)", () => {
+  it("states plainly when moving adds no forecast benefit (isEarliestAlreadyBest)", () => {
     const facts: PlanFacts = {
       ...baseFacts,
       activities: [
@@ -94,6 +94,9 @@ describe("derivePlanDecision", () => {
           bestCandidate: {
             at: "2026-11-18T10:30:00.000Z",
             pm25: 42,
+            startHourPm25: 42,
+            durationMeanPm25: 42,
+            rankingMetric: "duration_weighted_mean_pm25",
             usAqi: 110,
           },
           eligibleCandidates: [],
@@ -111,29 +114,34 @@ describe("derivePlanDecision", () => {
     };
     const decision = derivePlanDecision(facts, "Asia/Kolkata");
     expect(decision?.headline).toBe("Keep your original time: Buy groceries at 4 PM");
-    expect(decision?.explanation).toContain("School pickup stays at 3 PM. ");
-    expect(decision?.explanation).toContain(
-      "earliest slot at 4 PM already offers the lowest forecast pollution (42 µg/m³)"
-    );
+    expect(decision?.explanation).toContain("School pickup stays at 3 PM.");
+    expect(decision?.explanation).toContain("adds no forecast benefit");
+    expect(decision?.explanation).toContain("lowest one-hour mean forecast PM₂.₅ (42 µg/m³)");
   });
 
-  it("handles tied candidates", () => {
+  it("handles tied candidates explicitly using duration mean metric", () => {
     const facts: PlanFacts = {
       ...baseFacts,
       activities: [
         {
           id: "act-1",
           title: "Grocery shopping",
-          durationMinutes: 60,
+          durationMinutes: 90,
           bestCandidate: {
             at: "2026-11-18T10:30:00.000Z",
             pm25: 50,
+            startHourPm25: 50,
+            durationMeanPm25: 53.33,
+            rankingMetric: "duration_weighted_mean_pm25",
             usAqi: 125,
           },
           tiedCandidates: [
             {
               at: "2026-11-18T12:30:00.000Z",
               pm25: 50,
+              startHourPm25: 60,
+              durationMeanPm25: 53.33,
+              rankingMetric: "duration_weighted_mean_pm25",
               usAqi: 125,
             },
           ],
@@ -145,21 +153,24 @@ describe("derivePlanDecision", () => {
     const decision = derivePlanDecision(facts, "Asia/Kolkata");
     expect(decision?.headline).toBe("Buy groceries at 4 PM");
     expect(decision?.explanation).toBe(
-      "Both 4 PM and 6 PM have the same lowest forecast PM₂.₅ (50 µg/m³)."
+      "Both 4 PM and 6 PM tie for the lowest 90-minute mean forecast PM₂.₅ (53.3 µg/m³)."
     );
   });
 
-  it("handles rescheduled lower-pollution hour with before/after comparison", () => {
+  it("handles rescheduled lower-pollution hour separating outdoor concentration from personal dose", () => {
     const facts: PlanFacts = {
       ...baseFacts,
       activities: [
         {
           id: "act-1",
           title: "Grocery shopping",
-          durationMinutes: 60,
+          durationMinutes: 120,
           bestCandidate: {
             at: "2026-11-18T12:30:00.000Z",
             pm25: 35,
+            startHourPm25: 30,
+            durationMeanPm25: 35,
+            rankingMetric: "duration_weighted_mean_pm25",
             usAqi: 95,
           },
           eligibleCandidates: [],
@@ -177,19 +188,21 @@ describe("derivePlanDecision", () => {
       beforeAfterComparison: {
         activityId: "act-1",
         activityTitle: "Grocery shopping",
+        metric: "duration_weighted_mean_pm25",
         baselineTime: "2026-11-18T10:30:00.000Z",
         baselinePm25: 90,
         optimizedTime: "2026-11-18T12:30:00.000Z",
         optimizedPm25: 35,
+        concentrationReductionPercent: 61,
         exposureReductionPercent: 61,
-        justification: "Shift to lower pollution",
+        justification: "Shift to lower concentration",
       },
     };
     const decision = derivePlanDecision(facts, "Asia/Kolkata");
     expect(decision?.headline).toBe("Buy groceries at 6 PM");
-    expect(decision?.explanation).toContain("School pickup stays at 3 PM. ");
+    expect(decision?.explanation).toContain("School pickup stays at 3 PM.");
     expect(decision?.explanation).toContain(
-      "forecast is 35 µg/m³ at 6 PM, compared with 90 µg/m³ at 4 PM (61% lower forecast PM₂.₅)."
+      "120-minute mean forecast PM₂.₅ is 35 µg/m³ at 6 PM, vs 90 µg/m³ at 4 PM (61% lower outdoor forecast concentration; personal inhaled dose is not measured)."
     );
   });
 });

@@ -20,6 +20,10 @@ export type TransportMode = "car" | "transit" | "walk" | "bike" | "ev" | "none";
 export interface TransportDetails {
   mode: TransportMode;
   distanceKm?: number;
+  /** Explicit carpool occupants (>= 2) when sharing a vehicle trip */
+  carpoolOccupancy?: number;
+  /** Explicit avoided vehicle-km from eliminating or combining a trip */
+  avoidedVehicleKm?: number;
 }
 
 export interface HouseholdDetails {
@@ -37,15 +41,37 @@ export interface PlanInput {
   budget?: "low" | "medium" | "high";
 }
 
+export interface ActivityCandidate extends AirSample {
+  /** Time-weighted mean forecast PM2.5 across the full activity duration (µg/m³) */
+  durationMeanPm25: number;
+  /** Forecast PM2.5 for the start hour interval only (µg/m³) */
+  startHourPm25: number | null;
+  /** Time-weighted mean US AQI across the activity duration */
+  durationMeanUsAqi?: number | null;
+  /** Explicit metric used to rank candidates */
+  rankingMetric: "duration_weighted_mean_pm25";
+}
+
 export interface ActivityFacts {
   id: string;
   title: string;
   durationMinutes: number;
-  eligibleCandidates: AirSample[];
-  bestCandidate: AirSample | null;
-  tiedCandidates?: AirSample[];
+  eligibleCandidates: ActivityCandidate[];
+  bestCandidate: ActivityCandidate | null;
+  tiedCandidates?: ActivityCandidate[];
   isEarliestAlreadyBest?: boolean;
   reason: string;
+}
+
+export interface EmissionsFactorMetadata {
+  publication: string;
+  year: number;
+  geography: string;
+  baselineModeFactor: string;
+  alternativeModeFactor: string;
+  unit: "kg CO₂e/passenger-km" | "kg CO₂e/vehicle-km" | "kg CO₂e";
+  occupancyAssumption: string;
+  isOutsideReferenceGeography: boolean;
 }
 
 export interface TransportComparison {
@@ -53,21 +79,31 @@ export interface TransportComparison {
   suggestedMode: string;
   distanceKm: number | null;
   estimatedCo2KgSaved: number | null;
-  units: string;
+  units: string | null;
   factorSource: string;
   assumptions: string;
+  missingInputs?: string[];
+  factorMetadata?: EmissionsFactorMetadata;
   isEstimate: boolean;
-  impactType: "lower_exposure" | "lower_emissions" | "both";
+  impactType: "lower_exposure" | "lower_emissions" | "both" | "qualitative_guidance";
+  action?: string;
+  mechanism?: string;
+  beneficiary?: string;
   explanation: string;
 }
 
 export interface BeforeAfterComparison {
   activityId: string;
   activityTitle: string;
+  metric: "duration_weighted_mean_pm25";
   baselineTime: string;
   baselinePm25: number | null;
+  baselineStartHourPm25?: number | null;
   optimizedTime: string;
   optimizedPm25: number | null;
+  optimizedStartHourPm25?: number | null;
+  concentrationReductionPercent: number | null;
+  /** Alias preserved for compatibility; measures outdoor forecast PM2.5 concentration difference */
   exposureReductionPercent: number | null;
   justification: string;
 }

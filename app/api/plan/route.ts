@@ -37,6 +37,8 @@ const PlanRequestSchema = z.object({
       .object({
         mode: z.enum(["car", "transit", "walk", "bike", "ev", "none"]),
         distanceKm: z.number().min(0).max(500).optional(),
+        carpoolOccupancy: z.number().int().min(1).max(10).optional(),
+        avoidedVehicleKm: z.number().min(0).max(500).optional(),
       })
       .optional(),
     availableTransportModes: z

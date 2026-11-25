@@ -80,6 +80,8 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   // Transport details
   const [transportMode, setTransportMode] = useState<TransportMode>("car");
   const [distanceKm, setDistanceKm] = useState<string>("8");
+  const [carpoolOccupancy, setCarpoolOccupancy] = useState<string>("");
+  const [avoidedVehicleKm, setAvoidedVehicleKm] = useState<string>("");
   const [availableModes, setAvailableModes] = useState<TransportMode[]>([
     "car",
     "transit",
@@ -160,7 +162,9 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.transportMode) setTransportMode(parsed.transportMode);
-        if (parsed.distanceKm) setDistanceKm(parsed.distanceKm);
+        if (parsed.distanceKm !== undefined) setDistanceKm(String(parsed.distanceKm));
+        if (parsed.carpoolOccupancy !== undefined) setCarpoolOccupancy(String(parsed.carpoolOccupancy));
+        if (parsed.avoidedVehicleKm !== undefined) setAvoidedVehicleKm(String(parsed.avoidedVehicleKm));
         if (parsed.availableModes) setAvailableModes(parsed.availableModes);
         if (parsed.sensitiveMembers !== undefined) setSensitiveMembers(parsed.sensitiveMembers);
         if (parsed.hasAirPurifier !== undefined) setHasAirPurifier(parsed.hasAirPurifier);
@@ -176,6 +180,8 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       const prefs = {
         transportMode,
         distanceKm,
+        carpoolOccupancy,
+        avoidedVehicleKm,
         availableModes,
         sensitiveMembers,
         hasAirPurifier,
@@ -268,11 +274,15 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
     const currentSeq = ++submissionSeqRef.current;
 
     const distNum = parseFloat(distanceKm);
+    const carpoolNum = parseInt(carpoolOccupancy, 10);
+    const avoidedNum = parseFloat(avoidedVehicleKm);
     const planInput: PlanInput = {
       ...schedule,
       transport: {
         mode: transportMode,
         distanceKm: !isNaN(distNum) && distNum > 0 ? distNum : undefined,
+        carpoolOccupancy: !isNaN(carpoolNum) && carpoolNum >= 1 ? carpoolNum : undefined,
+        avoidedVehicleKm: !isNaN(avoidedNum) && avoidedNum > 0 ? avoidedNum : undefined,
       },
       availableTransportModes: availableModes,
       household: {
@@ -363,16 +373,22 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
     return `${startFull} to ${endFull}`;
   }, [range, timeZone]);
 
-  // Default transport advice respecting availableModes
+  // Default transport advice respecting availableModes (only used if transportComparison is null)
   const defaultTransportAdvice = useMemo(() => {
+    if (transportMode === "none") {
+      return "No road travel needed; focus on indoor air protection during peak hours.";
+    }
     if (availableModes.includes("transit")) {
-      return "Choose shared public transit or electric rail when commuting to minimize vehicle emissions.";
+      return "Consider public transit if a route serves your errand; enter trip distance (km) to estimate CO₂e difference.";
     }
     if (availableModes.includes("walk") || availableModes.includes("bike")) {
-      return "Combine outdoor errands or consider active travel with an N95 mask for shorter neighborhood trips.";
+      return "Consider short-distance active travel only if safe for errand loads; higher exertion warrants a fitted N95 mask on smog days.";
     }
-    return "Consolidate daily driving into a single trip or carpool to reduce vehicle cold-start emissions.";
-  }, [availableModes]);
+    if (availableModes.includes("ev")) {
+      return "If driving an EV, use cabin air recirculation to reduce outdoor particle entry.";
+    }
+    return "No alternative travel modes selected. Quantified emissions estimates require trip distance and transit, carpool occupancy, or avoided vehicle-km inputs.";
+  }, [availableModes, transportMode]);
 
   return (
     <section
@@ -640,6 +656,43 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                 />
               </div>
             </div>
+
+            {transportMode === "car" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="carpool-occupancy" className="block text-stone-600 mb-1 font-medium">
+                    Carpool Occupants (optional, ≥ 2)
+                  </label>
+                  <input
+                    id="carpool-occupancy"
+                    type="number"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={carpoolOccupancy}
+                    onChange={(e) => setCarpoolOccupancy(e.target.value)}
+                    placeholder="e.g. 2"
+                    className="w-full bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-900"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="avoided-vehicle-km" className="block text-stone-600 mb-1 font-medium">
+                    Avoided Driving Distance (km, optional)
+                  </label>
+                  <input
+                    id="avoided-vehicle-km"
+                    type="number"
+                    min="0"
+                    max="150"
+                    step="0.5"
+                    value={avoidedVehicleKm}
+                    onChange={(e) => setAvoidedVehicleKm(e.target.value)}
+                    placeholder="e.g. 4"
+                    className="w-full bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-900"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Alternatives checkboxes */}
             <div>

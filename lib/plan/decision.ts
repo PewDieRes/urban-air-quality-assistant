@@ -1,5 +1,6 @@
 import { PlanFacts } from "./types";
 import { formatHourlyTime } from "../forecast/open-meteo";
+import { formatPm25Value } from "./facts";
 
 export interface PlanDecision {
   headline: string;
@@ -8,7 +9,7 @@ export interface PlanDecision {
 
 /**
  * Pure, deterministic function deriving the primary decision headline and explanation
- * from verified plan facts.
+ * from verified plan facts using the duration-weighted mean forecast PM2.5 metric.
  */
 export function derivePlanDecision(
   facts: PlanFacts | null | undefined,
@@ -30,34 +31,36 @@ export function derivePlanDecision(
     return {
       headline: `No eligible slot for ${primaryAct.title}`,
       explanation: firstCommitment
-        ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone).replace(":00 ", " ")}. No available hour in your requested window fits your activity around it. Try widening your time window.`
-        : `No available hour in your requested window fits your activity duration. Try widening your time window.`,
+        ? `${firstCommitment.title} stays at ${formatHourlyTime(firstCommitment.start, timeZone).replace(":00 ", " ")}. No available slot with complete forecast coverage fits your activity around it. Try widening your time window.`
+        : `No available slot with complete forecast coverage fits your activity duration. Try widening your time window.`,
     };
   }
 
   const bestTime = formatHourlyTime(primaryAct.bestCandidate.at, timeZone);
   const cleanBestTime = bestTime.replace(":00 ", " ");
-  const bestPm = primaryAct.bestCandidate.pm25 !== null ? Math.round(primaryAct.bestCandidate.pm25) : null;
-  const pickupTime = firstCommitment ? formatHourlyTime(firstCommitment.start, timeZone).replace(":00 ", " ") : "";
-  const pickupStay = firstCommitment
-    ? `${firstCommitment.title} stays at ${pickupTime}. `
+  const rawMean = primaryAct.bestCandidate.durationMeanPm25 ?? primaryAct.bestCandidate.pm25;
+  const bestPmStr = rawMean !== null && rawMean !== undefined ? formatPm25Value(rawMean) : null;
+  const pickupTime = firstCommitment
+    ? formatHourlyTime(firstCommitment.start, timeZone).replace(":00 ", " ")
     : "";
+  const pickupStay = firstCommitment ? `${firstCommitment.title} stays at ${pickupTime}. ` : "";
   const isGrocery = /grocer/i.test(primaryAct.title);
   const actLabel = isGrocery ? "grocery trip" : primaryAct.title.toLowerCase();
-  const durationLabel = primaryAct.durationMinutes === 60 ? "one-hour" : `${primaryAct.durationMinutes}-minute`;
+  const durationLabel =
+    primaryAct.durationMinutes === 60 ? "one-hour" : `${primaryAct.durationMinutes}-minute`;
 
-  // Earliest eligible hour was already best
+  // Earliest eligible hour was already best (moving adds no benefit)
   if (primaryAct.isEarliestAlreadyBest) {
     const headline = isGrocery
       ? `Keep your original time: Buy groceries at ${cleanBestTime}`
       : `Keep your original time: ${cleanBestTime}`;
     return {
       headline,
-      explanation: `${pickupStay}For your ${durationLabel} ${actLabel}, the earliest slot at ${cleanBestTime} already offers the lowest forecast pollution (${bestPm} µg/m³).`,
+      explanation: `${pickupStay}Moving your ${durationLabel} ${actLabel} adds no forecast benefit: the earliest slot at ${cleanBestTime} already has the lowest ${durationLabel} mean forecast PM₂.₅ (${bestPmStr} µg/m³).`,
     };
   }
 
-  // Two hours tied
+  // Two later hours tied
   if (primaryAct.tiedCandidates && primaryAct.tiedCandidates.length > 0) {
     const tiedTime = formatHourlyTime(primaryAct.tiedCandidates[0].at, timeZone).replace(":00 ", " ");
     const headline = isGrocery
@@ -65,23 +68,36 @@ export function derivePlanDecision(
       : `${primaryAct.title} at ${cleanBestTime}`;
     return {
       headline,
-      explanation: `${pickupStay}Both ${cleanBestTime} and ${tiedTime} have the same lowest forecast PM₂.₅ (${bestPm} µg/m³).`,
+      explanation: `${pickupStay}Both ${cleanBestTime} and ${tiedTime} tie for the lowest ${durationLabel} mean forecast PM₂.₅ (${bestPmStr} µg/m³).`,
     };
   }
 
-  // Rescheduled to lower-pollution hour
+  // Rescheduled to lower-pollution window
   if (facts.beforeAfterComparison) {
-    const baselineTime = formatHourlyTime(facts.beforeAfterComparison.baselineTime, timeZone).replace(":00 ", " ");
-    const baselinePm = facts.beforeAfterComparison.baselinePm25 !== null
-      ? Math.round(facts.beforeAfterComparison.baselinePm25)
-      : null;
-    const reduction = facts.beforeAfterComparison.exposureReductionPercent;
+    const baselineTime = formatHourlyTime(
+      facts.beforeAfterComparison.baselineTime,
+      timeZone
+    ).replace(":00 ", " ");
+    const rawBasePm = facts.beforeAfterComparison.baselinePm25;
+    const baselinePmStr =
+      rawBasePm !== null && rawBasePm !== undefined ? formatPm25Value(rawBasePm) : null;
+    const reduction =
+      facts.beforeAfterComparison.concentrationReductionPercent ??
+      facts.beforeAfterComparison.exposureReductionPercent;
     const headline = isGrocery
       ? `Buy groceries at ${cleanBestTime}`
       : `${primaryAct.title} at ${cleanBestTime}`;
+
+    if (reduction === 0) {
+      return {
+        headline,
+        explanation: `${pickupStay}Across your ${durationLabel} ${actLabel} at ${cleanBestTime}, the ${durationLabel} mean forecast PM₂.₅ (${bestPmStr} µg/m³) is virtually unchanged from ${baselineTime} (${baselinePmStr} µg/m³), adding negligible forecast benefit.`,
+      };
+    }
+
     return {
       headline,
-      explanation: `${pickupStay}For your ${durationLabel} ${actLabel}, the forecast is ${bestPm} µg/m³ at ${cleanBestTime}, compared with ${baselinePm} µg/m³ at ${baselineTime} (${reduction}% lower forecast PM₂.₅).`,
+      explanation: `${pickupStay}For your ${durationLabel} ${actLabel}, the ${durationLabel} mean forecast PM₂.₅ is ${bestPmStr} µg/m³ at ${cleanBestTime}, vs ${baselinePmStr} µg/m³ at ${baselineTime} (${reduction}% lower outdoor forecast concentration; personal inhaled dose is not measured).`,
     };
   }
 
@@ -90,6 +106,6 @@ export function derivePlanDecision(
     : `${primaryAct.title} at ${cleanBestTime}`;
   return {
     headline,
-    explanation: `${pickupStay}Forecast PM₂.₅ is ${bestPm} µg/m³ at ${cleanBestTime}, fitting within your schedule.`,
+    explanation: `${pickupStay}For your ${durationLabel} ${actLabel}, the ${durationLabel} mean forecast PM₂.₅ is ${bestPmStr} µg/m³ at ${cleanBestTime}.`,
   };
 }

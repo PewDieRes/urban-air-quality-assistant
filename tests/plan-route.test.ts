@@ -25,10 +25,31 @@ describe("grounded plan generation and validation", () => {
         title: "Grocery trip",
         durationMinutes: 60,
         eligibleCandidates: [
-          { at: "2026-11-18T16:00:00Z", pm25: 110, usAqi: 178 },
-          { at: "2026-11-18T18:00:00Z", pm25: 80, usAqi: 164 },
+          {
+            at: "2026-11-18T16:00:00Z",
+            pm25: 110,
+            startHourPm25: 110,
+            durationMeanPm25: 110,
+            rankingMetric: "duration_weighted_mean_pm25",
+            usAqi: 178,
+          },
+          {
+            at: "2026-11-18T18:00:00Z",
+            pm25: 80,
+            startHourPm25: 80,
+            durationMeanPm25: 80,
+            rankingMetric: "duration_weighted_mean_pm25",
+            usAqi: 164,
+          },
         ],
-        bestCandidate: { at: "2026-11-18T18:00:00Z", pm25: 80, usAqi: 164 },
+        bestCandidate: {
+          at: "2026-11-18T18:00:00Z",
+          pm25: 80,
+          startHourPm25: 80,
+          durationMeanPm25: 80,
+          rankingMetric: "duration_weighted_mean_pm25",
+          usAqi: 164,
+        },
         reason: "Optimal slot at 2026-11-18T18:00:00Z with lower forecast PM₂.₅ (80 µg/m³)",
       },
     ],
@@ -47,12 +68,14 @@ describe("grounded plan generation and validation", () => {
     beforeAfterComparison: {
       activityId: "act-grocery",
       activityTitle: "Grocery trip",
+      metric: "duration_weighted_mean_pm25",
       baselineTime: "2026-11-18T16:00:00Z",
       baselinePm25: 110,
       optimizedTime: "2026-11-18T18:00:00Z",
       optimizedPm25: 80,
+      concentrationReductionPercent: 27,
       exposureReductionPercent: 27,
-      justification: "Rescheduling achieves 27% lower particulate exposure",
+      justification: "Rescheduling achieves 27% lower forecast PM₂.₅ concentration",
     },
     indoorRecommendations: [
       "Operate HEPA air purifier on medium/high during evening peak hours.",
@@ -704,5 +727,207 @@ describe("grounded plan generation and validation", () => {
     // Attempt 1 fails (503) -> hasNextAttempt is true (attempt 1 < 2) -> mockSleep called once
     // Attempt 2 fails (503) -> hasNextAttempt is false (attempt 2 < 2 is false) -> mockSleep NOT called
     expect(mockSleep).toHaveBeenCalledTimes(1);
+  });
+
+  // PART D: Groundedness and constraint regressions
+  it("rejects mismatched category/reference when indoor item references an activity ID", () => {
+    const mismatched = {
+      summary: "Household smog plan.",
+      items: [
+        {
+          id: "rec-routine",
+          category: "routine",
+          action: "Conduct Grocery trip",
+          whyItHelps: "Lower forecast concentration",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-indoor",
+          category: "indoor",
+          action: "Seal windows when indoor air stagnates",
+          whyItHelps: "Keeps particles out",
+          beneficiary: "Family",
+          impactType: "health_protection",
+          evidenceFactId: "act-grocery", // INVALID: indoor item must not cite activity ID!
+        },
+        {
+          id: "rec-transport",
+          category: "transport",
+          action: "Consider metro transit",
+          whyItHelps: "Lower trip emissions",
+          beneficiary: "Commuter",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-impact",
+          category: "direct_impact",
+          action: "Reschedule grocery trip",
+          whyItHelps: "Lower outdoor concentration",
+          beneficiary: "Family",
+          impactType: "lower_exposure",
+        },
+      ],
+    };
+
+    const result = validatePlanNarrative(mismatched, sampleFacts, sampleInput);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("mismatched_category_reference");
+    }
+  });
+
+  it("rejects made-up measurement or clock time inside displayed indoor/transport guidance", () => {
+    const madeUpMeasurement = {
+      summary: "Household smog plan.",
+      items: [
+        {
+          id: "rec-routine",
+          category: "routine",
+          action: "Grocery trip",
+          whyItHelps: "Lower smog",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-indoor",
+          category: "indoor",
+          action: "Keep bedroom HEPA unit running so indoor air reaches 12 µg/m³", // Invented measurement!
+          whyItHelps: "Reduces indoor particulates",
+          beneficiary: "Family",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-transport",
+          category: "transport",
+          action: "Take metro transit",
+          whyItHelps: "Lowers vehicle emissions",
+          beneficiary: "Commuter",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-impact",
+          category: "direct_impact",
+          action: "Shift outdoor activity",
+          whyItHelps: "Lower concentration",
+          beneficiary: "Family",
+          impactType: "lower_exposure",
+        },
+      ],
+    };
+
+    const result = validatePlanNarrative(madeUpMeasurement, sampleFacts, sampleInput);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("unsupported_claim");
+    }
+  });
+
+  it("rejects advice assuming transit when transit is excluded from availableTransportModes", () => {
+    const noTransitInput: PlanInput = {
+      ...sampleInput,
+      transport: { mode: "car", distanceKm: 8 },
+      availableTransportModes: ["car", "walk"],
+    };
+
+    const assumesTransit = {
+      summary: "Household plan",
+      items: [
+        {
+          id: "rec-routine",
+          category: "routine",
+          action: "Grocery trip",
+          whyItHelps: "Lower concentration",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-indoor",
+          category: "indoor",
+          action: "Keep windows closed during high PM2.5 hours",
+          whyItHelps: "Prevents outdoor smoke ingress",
+          beneficiary: "Family",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-transport",
+          category: "transport",
+          action: "Take the Delhi Metro instead of driving", // Assumes unavailable transit!
+          whyItHelps: "Avoids car tailpipe emissions",
+          beneficiary: "Commuter",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-impact",
+          category: "direct_impact",
+          action: "Avoid vigorous exercise outdoors",
+          whyItHelps: "Reduces breathing rate during peak pollution",
+          beneficiary: "Family",
+          impactType: "lower_exposure",
+        },
+      ],
+    };
+
+    const result = validatePlanNarrative(assumesTransit, sampleFacts, noTransitInput);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("unsupported_transport_assumption");
+    }
+  });
+
+  it("rejects advice assuming an air purifier when household hasAirPurifier is false", () => {
+    const noPurifierInput: PlanInput = {
+      ...sampleInput,
+      household: { sensitiveMembers: true, hasAirPurifier: false },
+      budget: "low",
+    };
+
+    const assumesPurifier = {
+      summary: "Household plan",
+      items: [
+        {
+          id: "rec-routine",
+          category: "routine",
+          action: "Grocery trip",
+          whyItHelps: "Lower concentration",
+          beneficiary: "All",
+          impactType: "lower_exposure",
+          evidenceFactId: "act-grocery",
+        },
+        {
+          id: "rec-indoor",
+          category: "indoor",
+          action: "Run your HEPA air purifier on high speed continuously", // Assumes nonexistent purifier!
+          whyItHelps: "Filters fine particles",
+          beneficiary: "Family",
+          impactType: "health_protection",
+        },
+        {
+          id: "rec-transport",
+          category: "transport",
+          action: "Take public transit if served by your route",
+          whyItHelps: "Avoids solo car emissions",
+          beneficiary: "Commuter",
+          impactType: "lower_emissions",
+        },
+        {
+          id: "rec-impact",
+          category: "direct_impact",
+          action: "Shift errands to the cleaner hour",
+          whyItHelps: "Lower concentration",
+          beneficiary: "Family",
+          impactType: "lower_exposure",
+        },
+      ],
+    };
+
+    const result = validatePlanNarrative(assumesPurifier, sampleFacts, noPurifierInput);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe("unsupported_household_assumption");
+    }
   });
 });
