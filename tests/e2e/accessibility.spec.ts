@@ -234,12 +234,22 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       const alertBox = planner.getByRole("alert");
       await expect(alertBox).toBeVisible();
       await expect(alertBox).toBeFocused();
-      const alertClearance = await page.evaluate(() => {
-        const header = document.querySelector("header")!.getBoundingClientRect();
-        const alert = document.querySelector("#household-plan-section [role='alert']")!.getBoundingClientRect();
-        return { headerBottom: header.bottom, alertTop: alert.top };
-      });
-      expect(alertClearance.alertTop).toBeGreaterThanOrEqual(alertClearance.headerBottom - 2);
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(() => {
+              const header = document.querySelector("header")!.getBoundingClientRect();
+              const alert = document
+                .querySelector("#household-plan-section [role='alert']")!
+                .getBoundingClientRect();
+              return alert.top >= header.bottom - 2 && alert.top < window.innerHeight;
+            }),
+          {
+            timeout: 3000,
+            message: "Validation alert should scroll visibly below the sticky header",
+          }
+        )
+        .toBe(true);
 
       // 7. Enter valid schedule via keyboard & submit
       await commStart.fill("2026-11-18T15:00");
@@ -260,24 +270,35 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       await expect(decisionHeading).toBeFocused({ timeout: 5000 });
       await expect(liveStatus).toContainText(/Buy groceries at 6 PM.*Forecast-based plan/i);
 
-      // Give scroll animation/layout a beat to settle if any
-      await page.waitForTimeout(300);
+      // Poll until smooth scroll finishes and verify decision <h3> rests cleanly below sticky header
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(() => {
+              const header = document.querySelector("header")!.getBoundingClientRect();
+              const h3 = document.querySelector("#household-plan-section h3")!;
+              const rect = h3.getBoundingClientRect();
+              return rect.top >= header.bottom - 2 && rect.top < window.innerHeight;
+            }),
+          {
+            timeout: 3000,
+            message: "Decision heading should scroll visibly below the sticky header",
+          }
+        )
+        .toBe(true);
 
-      const headingAudit = await page.evaluate(() => {
-        const header = document.querySelector("header")!.getBoundingClientRect();
+      const headingFocusStyle = await page.evaluate(() => {
         const h3 = document.querySelector("#household-plan-section h3")!;
-        const rect = h3.getBoundingClientRect();
         const style = window.getComputedStyle(h3);
         return {
-          headerBottom: header.bottom,
-          headingTop: rect.top,
           boxShadow: style.boxShadow,
           outlineStyle: style.outlineStyle,
         };
       });
-      expect(headingAudit.headingTop).toBeGreaterThanOrEqual(headingAudit.headerBottom - 2);
       // Verify focus indicator is visually present (box-shadow ring or outline)
-      expect(headingAudit.boxShadow !== "none" || headingAudit.outlineStyle !== "none").toBe(true);
+      expect(headingFocusStyle.boxShadow !== "none" || headingFocusStyle.outlineStyle !== "none").toBe(
+        true
+      );
 
       // 9. Expand assumptions <details> via keyboard
       const assumptionsSummary = planner.locator("summary", {
@@ -293,13 +314,22 @@ test.describe("Keyboard Accessibility, Viewport Clearance & Automated Axe Audit"
       await page.keyboard.press("Enter");
       await expect(planner.locator("input").first()).toBeFocused();
 
-      await page.waitForTimeout(300);
-      const inputClearance = await page.evaluate(() => {
-        const header = document.querySelector("header")!.getBoundingClientRect();
-        const input = document.querySelector("#household-plan-section form input")!.getBoundingClientRect();
-        return { headerBottom: header.bottom, inputTop: input.top };
-      });
-      expect(inputClearance.inputTop).toBeGreaterThanOrEqual(inputClearance.headerBottom - 2);
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(() => {
+              const header = document.querySelector("header")!.getBoundingClientRect();
+              const input = document
+                .querySelector("#household-plan-section form input")!
+                .getBoundingClientRect();
+              return input.top >= header.bottom - 2 && input.top < window.innerHeight;
+            }),
+          {
+            timeout: 3000,
+            message: "First form input should scroll visibly below the sticky header",
+          }
+        )
+        .toBe(true);
 
       // 11. Run full-page axe-core audit on generated result state (all WCAG 2A/2AA rules including color-contrast)
       const resultAxe = await page.evaluate(async () => {
