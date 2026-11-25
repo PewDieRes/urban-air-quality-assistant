@@ -11,6 +11,7 @@ import {
 } from "@/lib/plan/types";
 import { Forecast } from "@/lib/forecast/types";
 import { computePlanFacts } from "@/lib/plan/facts";
+import { derivePlanDecision } from "@/lib/plan/decision";
 import { cityClock, scheduleError, forecastRange } from "@/lib/plan/schedule";
 import { formatHourlyTime, formatHourlyTimeWithDate } from "@/lib/forecast/open-meteo";
 import {
@@ -258,8 +259,8 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       const msg = error instanceof Error ? error.message : "Check your schedule.";
       setInputError(msg);
       setTimeout(() => {
-        errorAlertRef.current?.focus();
-        errorAlertRef.current?.scrollIntoView({ behavior: getScrollBehavior(), block: "center" });
+        errorAlertRef.current?.focus({ preventScroll: true });
+        errorAlertRef.current?.scrollIntoView({ behavior: getScrollBehavior(), block: "start" });
       }, 50);
       return;
     }
@@ -350,7 +351,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
         setIsGenerating(false);
         setTimeout(() => {
           if (currentSeq === submissionSeqRef.current) {
-            resultHeadingRef.current?.focus();
+            resultHeadingRef.current?.focus({ preventScroll: true });
             resultHeadingRef.current?.scrollIntoView({ behavior: getScrollBehavior(), block: "start" });
           }
         }, 100);
@@ -361,8 +362,8 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
   const timeZone = forecast?.timeZone || "UTC";
 
   const handleScrollToForm = () => {
+    firstInputRef.current?.focus({ preventScroll: true });
     formRef.current?.scrollIntoView({ behavior: getScrollBehavior(), block: "start" });
-    firstInputRef.current?.focus();
   };
 
   // Available range label for inputs outside forecast with dates and times
@@ -390,11 +391,29 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
     return "No alternative travel modes selected. Quantified emissions estimates require trip distance and transit, carpool occupancy, or avoided vehicle-km inputs.";
   }, [availableModes, transportMode]);
 
+  const liveStatusMessage = useMemo(() => {
+    if (isGenerating) {
+      return "Finding lowest-pollution hour and checking Gemini explanation.";
+    }
+    if (factsResult && planStatus && planStatus !== "pending") {
+      const dec = derivePlanDecision(factsResult, timeZone);
+      const badgeText =
+        planStatus === "gemini_generated" ? "Explained by Gemini." : "Forecast-based plan.";
+      return dec ? `Plan ready: ${dec.headline}. ${badgeText}` : badgeText;
+    }
+    return "";
+  }, [isGenerating, factsResult, planStatus, timeZone]);
+
   return (
     <section
       aria-labelledby="plan-my-day-heading"
       className="bg-white border border-stone-200/90 rounded-2xl p-5 shadow-sm text-stone-900"
     >
+      {/* Screen-reader polite announcement for loading and final schedule decision */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {liveStatusMessage}
+      </div>
+
       {/* Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-3.5 border-b border-stone-100">
         <div>
@@ -421,7 +440,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
           ref={errorAlertRef}
           tabIndex={-1}
           role="alert"
-          className="scroll-mt-24 focus:outline-none mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800"
+          className="scroll-mt-52 sm:scroll-mt-40 lg:scroll-mt-32 focus:outline-none focus:ring-2 focus:ring-rose-600 focus:ring-offset-1 mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800"
         >
           <div className="flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -438,7 +457,11 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
       )}
 
       {/* Schedule Form */}
-      <form ref={formRef} onSubmit={handleBuildPlan} className="scroll-mt-24 mt-4 space-y-4">
+      <form
+        ref={formRef}
+        onSubmit={handleBuildPlan}
+        className="scroll-mt-52 sm:scroll-mt-40 lg:scroll-mt-32 mt-4 space-y-4"
+      >
         {/* Fixed Commitments Row (School pickup) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -501,7 +524,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                     type="button"
                     onClick={() => handleRemoveCommitment(commitment.id)}
                     aria-label={`Remove commitment ${commitment.title}`}
-                    className="p-1 text-stone-400 hover:text-rose-600 transition"
+                    className="p-1 text-stone-600 hover:text-rose-600 transition"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -595,7 +618,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
                     type="button"
                     onClick={() => handleRemoveActivity(activity.id)}
                     aria-label={`Remove activity ${activity.title}`}
-                    className="p-1 text-stone-400 hover:text-rose-600 transition"
+                    className="p-1 text-stone-600 hover:text-rose-600 transition"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -612,7 +635,7 @@ export function PlanPanel({ forecast, locationName, lat, lon }: PlanPanelProps) 
               <Home className="w-3.5 h-3.5 text-stone-500" />
               Optional household, budget &amp; transport settings
             </span>
-            <span className="text-stone-400 text-[11px] group-open:rotate-180 transition-transform">
+            <span className="text-stone-600 text-[11px] group-open:rotate-180 transition-transform">
               ▼
             </span>
           </summary>

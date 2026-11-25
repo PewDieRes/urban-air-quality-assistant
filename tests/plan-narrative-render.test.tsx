@@ -545,7 +545,9 @@ it("shows separate start-hour label when multi-hour duration mean differs from s
   fireEvent.click(screen.getByRole("button", { name: "Find a time" }));
   await screen.findByText("Forecast-based plan");
 
-  expect(screen.getByText(/Keep your original time: Buy groceries at 6 PM/i)).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { level: 3, name: /Keep your original time: Buy groceries at 6 PM/i })
+  ).toBeTruthy();
   expect(screen.getByText(/adds no forecast benefit/i)).toBeTruthy();
   expect(screen.getByTestId("activity-duration-mean").textContent).toBe("75 µg/m³ (120m mean)");
   expect(screen.getByTestId("activity-start-hour-pm25").textContent).toBe("Start hr: 60 µg/m³");

@@ -229,7 +229,7 @@ test.describe("Redesign Screenshots Verification", () => {
 
     await expect(planner.getByText(/school pickup stays at 3 pm/i)).toBeVisible();
     await expect(planner.getByText("3:00 PM - 3:30 PM")).toBeVisible();
-    await expect(planner.getByText("Explained by Gemini")).toBeVisible();
+    await expect(planner.getByText("Explained by Gemini", { exact: true })).toBeVisible();
 
     await labelSampleData(page);
 

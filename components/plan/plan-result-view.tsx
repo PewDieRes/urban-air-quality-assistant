@@ -99,8 +99,7 @@ export function PlanResultView({
           <button
             type="button"
             onClick={onEditInputs}
-            className="flex items-center gap-1 text-[11px] font-medium text-teal-800 hover:text-teal-900 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60 transition"
-            aria-label="Edit schedule inputs"
+            className="flex items-center gap-1 text-[11px] font-medium text-teal-800 hover:text-teal-900 bg-teal-50 px-2 py-0.5 rounded border border-teal-200/60 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-700"
           >
             <Edit3 className="w-3 h-3" />
             <span>Edit inputs</span>
@@ -125,7 +124,7 @@ export function PlanResultView({
         <h3
           ref={resultHeadingRef}
           tabIndex={-1}
-          className="scroll-mt-24 focus:outline-none text-lg font-bold text-teal-950 tracking-tight"
+          className="scroll-mt-52 sm:scroll-mt-40 lg:scroll-mt-32 focus:outline-none focus:ring-2 focus:ring-teal-700 focus:ring-offset-2 rounded text-lg font-bold text-teal-950 tracking-tight"
         >
           {decisionOutput.headline}
         </h3>
@@ -311,7 +310,7 @@ export function PlanResultView({
       <details className="border border-stone-200 rounded-xl p-3 bg-stone-50/50 text-xs text-stone-600">
         <summary className="cursor-pointer font-semibold text-stone-700 select-none flex items-center justify-between">
           <span>How we calculated this (sources, units &amp; assumptions)</span>
-          <span className="text-[11px] text-stone-400">Click to expand</span>
+          <span className="text-[11px] text-stone-600">Click to expand</span>
         </summary>
 
         <div className="pt-2 mt-2 border-t border-stone-200/60 space-y-2">

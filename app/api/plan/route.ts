@@ -124,7 +124,9 @@ export async function POST(request: NextRequest) {
       { headers: { "X-Request-Id": requestId } }
     );
   } catch (error) {
-    console.error(`[plan:${requestId}] Plan route error:`, error);
+    console.error(
+      `[plan:${requestId}] Plan route error: ${error instanceof Error ? error.message : "unknown_error"}`
+    );
     return NextResponse.json(
       { error: { code: "SERVER_ERROR", message: "Failed to process plan request" } },
       { status: 500, headers: { "X-Request-Id": requestId } }

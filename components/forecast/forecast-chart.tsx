@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useId } from "react";
 import { Forecast, AirSample, getAqiCategory } from "@/lib/forecast/types";
 import { formatHourlyTime, formatHourlyTimeWithDate } from "@/lib/forecast/open-meteo";
 
@@ -18,6 +18,7 @@ export function ForecastChart({
   className = "",
 }: ForecastChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const gradientId = useId();
 
   const hourlySlots: AirSample[] = useMemo(() => {
     return forecast?.hourly?.slice(0, 24) || [];
@@ -136,7 +137,7 @@ export function ForecastChart({
 
   return (
     <div
-      className={`bg-white border border-stone-200/90 rounded-xl p-4 shadow-sm flex flex-col gap-3 ${className}`}
+      className={`bg-white border border-stone-200/90 rounded-xl p-4 shadow-sm flex flex-col gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 ${className}`}
       role="region"
       aria-label="Hourly air quality forecast"
       tabIndex={0}
@@ -146,10 +147,10 @@ export function ForecastChart({
       {/* Chart Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-2.5">
         <div>
-          <span className="text-xs uppercase font-semibold tracking-wider text-stone-500">
+          <span className="text-xs uppercase font-semibold tracking-wider text-stone-600">
             24-Hour PM₂.₅ Profile ({timeZone})
           </span>
-          <p className="text-[11px] text-stone-400">
+          <p className="text-[11px] text-stone-600">
             Click or use arrow keys to inspect hourly readings. Gaps denote missing data.
           </p>
         </div>
@@ -180,7 +181,7 @@ export function ForecastChart({
           preserveAspectRatio="none"
         >
           <defs>
-            <linearGradient id="pm25Fill" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#0f766e" stopOpacity="0.22" />
               <stop offset="100%" stopColor="#0f766e" stopOpacity="0.02" />
             </linearGradient>
@@ -256,7 +257,7 @@ export function ForecastChart({
 
             return (
               <g key={`seg-${sIdx}`}>
-                <path d={areaPath} fill="url(#pm25Fill)" />
+                <path d={areaPath} fill={`url(#${gradientId})`} />
                 <path
                   d={linePath}
                   fill="none"
@@ -351,7 +352,7 @@ export function ForecastChart({
       <details className="mt-1 pt-2 border-t border-stone-100 text-xs text-stone-600">
         <summary className="cursor-pointer text-stone-600 hover:text-stone-900 font-medium py-1 select-none flex items-center justify-between">
           <span>Exact hourly forecast values (accessible table)</span>
-          <span className="text-[11px] text-stone-400">Click to expand</span>
+          <span className="text-[11px] text-stone-600">Click to expand</span>
         </summary>
         <div className="max-h-56 overflow-y-auto mt-2 border border-stone-200 rounded-lg">
           <table className="w-full text-left text-xs">
@@ -371,13 +372,18 @@ export function ForecastChart({
                 return (
                   <tr
                     key={slot.at}
-                    className={`hover:bg-stone-50 cursor-pointer ${
+                    className={`hover:bg-stone-50 ${
                       isSelected ? "bg-teal-50/70 font-semibold text-teal-900" : ""
                     }`}
-                    onClick={() => onSelectHour && onSelectHour(slot)}
                   >
                     <td className="py-1 px-3">
-                      {info.time} {info.isNextDay ? `(${info.date})` : ""}
+                      <button
+                        type="button"
+                        onClick={() => onSelectHour && onSelectHour(slot)}
+                        className="text-left underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 rounded px-0.5"
+                      >
+                        {info.time} {info.isNextDay ? `(${info.date})` : ""}
+                      </button>
                     </td>
                     <td className="py-1 px-3">
                       {slot.pm25 !== null ? `${slot.pm25.toFixed(1)} µg/m³` : "Missing"}

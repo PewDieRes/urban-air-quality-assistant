@@ -83,6 +83,7 @@ function collectAllowedFactValues(facts: PlanFacts) {
       addPm(act.bestCandidate.startHourPm25);
       addPm(act.bestCandidate.pm25);
       addTime(act.bestCandidate.at);
+      addTime(new Date(Date.parse(act.bestCandidate.at) + (act.durationMinutes || 60) * 60000).toISOString());
       if (act.bestCandidate.durationMeanUsAqi !== null && act.bestCandidate.durationMeanUsAqi !== undefined) {
         aqiStrings.add(String(act.bestCandidate.durationMeanUsAqi));
       }
